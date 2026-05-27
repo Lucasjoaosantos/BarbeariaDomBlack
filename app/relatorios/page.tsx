@@ -469,7 +469,7 @@ export default function CaixaRelatoriosPage() {
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={dadosGrafico}>
                               <XAxis dataKey="data" stroke="#71717a" fontSize={10} />
-                              <Tooltip formatter={(value: number) => brl(value)} />
+                              <Tooltip formatter={(value) => brl(Number(value))} />
                               <Area
                                 type="monotone"
                                 dataKey="valor"
