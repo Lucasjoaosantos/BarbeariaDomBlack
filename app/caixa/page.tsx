@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Trash2, Plus, Receipt } from 'lucide-react'
+export const dynamic = 'force-dynamic'
 
 interface Cliente {
   id: number
