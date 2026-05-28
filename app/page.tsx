@@ -121,7 +121,7 @@ export default function LoginPage() {
         </form>
       {/* FOOTER */}
       <footer className="border-t border-zinc-900 py-8 text-center text-zinc-600 text-sm tracking-wide">
-        © 2026 DJOAO SANTOS — Todos os direitos reservados.
+        © 2026 JOAO LUCAS SANTOS — Todos os direitos reservados.
       </footer>
       </div>
     </div>
