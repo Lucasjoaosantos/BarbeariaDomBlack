@@ -72,7 +72,10 @@ export default function LoginPage() {
               {erro}
             </div>
           )}
-
+     {/* FOOTER */}
+      <footer className="border-t border-zinc-900 py-8 text-center text-zinc-600 text-sm tracking-wide">
+        © 2026 JOAO LUCAS SANTOS — Todos os direitos reservados.
+      </footer>
           <div className="space-y-3">
             <div className="relative">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
