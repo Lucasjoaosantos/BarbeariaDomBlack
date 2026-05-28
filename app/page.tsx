@@ -74,7 +74,8 @@ export default function LoginPage() {
           )}
      {/* FOOTER */}
       <footer className="border-t border-zinc-900 py-8 text-center text-zinc-600 text-sm tracking-wide">
-        © 2026 JOAO LUCAS SANTOS — Todos os direitos reservados.
+        Todos os direitos reservados.
+        © 2026 JOAO LUCAS SANTOS
       </footer>
           <div className="space-y-3">
             <div className="relative">
