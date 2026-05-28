@@ -45,7 +45,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-black px-4 text-white font-sans antialiased selection:bg-white selection:text-black">
 
       <div className="w-full max-w-md space-y-8 rounded-3xl border border-zinc-800/60 bg-zinc-900/40 p-10 shadow-2xl backdrop-blur-md">
-
+     {/* FOOTER */}
+      <footer className="border-t border-zinc-900 py-8 text-center text-zinc-600 text-sm tracking-wide">
+        © 2026 JOAO LUCAS SANTOS — Todos os direitos reservados.
+      </footer>
         <div className="flex flex-col items-center justify-center space-y-2">
           <div className="h-36 w-36 overflow-hidden flex items-center justify-center">
             <img
