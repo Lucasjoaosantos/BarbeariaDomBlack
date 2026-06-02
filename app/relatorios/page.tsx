@@ -8,9 +8,6 @@ import { DollarSign, User, Shield, TrendingUp, ChevronDown, ChevronUp } from 'lu
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts'
 import { useGuard } from '@/hooks/useGuard'
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
-
-type UserRole = 'Admin' | 'Caixa' | 'Barber Gabriel' | 'Barber Eduardo'
 type TabId = 'financeiro' | 'barbeiros' | 'grafico' | 'lancamentos'
 
 interface Movimentacao {
@@ -20,26 +17,11 @@ interface Movimentacao {
   valor: number
   motivo: string
   profissional?: string
-  // CORREÇÃO BUG 5: campo dedicado de forma de pagamento
   forma_pagamento?: string
 }
 
-function podeVerMovimento(role: UserRole, mov: Movimentacao) {
-  if (role === 'Admin') return true
-  if (role === 'Caixa') return true
-  // BUG 2: comparação case-insensitive para não depender de como o caixa salvou
-  const prof = (mov.profissional || '').toLowerCase()
-  if (role === 'Barber Gabriel') return prof === 'gabriel'
-  if (role === 'Barber Eduardo') return prof === 'eduardo'
-  return false
-}
-
-// ─── Helper: detecta forma de pagamento ───────────────────────────────────────
-// Lê o campo forma_pagamento (salvo direto pelo caixa) ou faz fallback no texto do motivo
 function detectarFormaPagamento(mov: Movimentacao): string {
-  // Prioridade: campo dedicado
   if (mov.forma_pagamento) return mov.forma_pagamento.toLowerCase()
-  // Fallback: texto do motivo (legado)
   const mot = (mov.motivo || '').toLowerCase()
   if (mot.includes('pix')) return 'pix'
   if (mot.includes('dinheiro')) return 'dinheiro'
@@ -48,7 +30,6 @@ function detectarFormaPagamento(mov: Movimentacao): string {
   return 'outro'
 }
 
-// ─── Configuração das abas ────────────────────────────────────────────────────
 const TABS: { id: TabId; label: string }[] = [
   { id: 'financeiro',  label: 'Financeiro'  },
   { id: 'barbeiros',   label: 'Barbeiros'   },
@@ -56,20 +37,13 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'lancamentos', label: 'Lançamentos' },
 ]
 
-// ─── Componente principal ─────────────────────────────────────────────────────
 export default function CaixaRelatoriosPage() {
   const { usuario, negado } = useGuard('relatorios')
 
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState<'hoje' | '7dias' | 'mes' | 'ano'>('mes')
-
   const [abasAbertas,  setAbasAbertas]  = useState<Set<TabId>>(new Set())
   const [abasVisiveis, setAbasVisiveis] = useState<Set<TabId>>(new Set())
-
-const verTudo = usuario?.permissoes.verTudo ?? false
-const profissionalAtual = usuario?.profissional ?? ''
-
-  // Dados financeiros
   const [faturamentoGabriel,     setFaturamentoGabriel]     = useState(0)
   const [faturamentoEduardo,     setFaturamentoEduardo]     = useState(0)
   const [faturamentoGeral,       setFaturamentoGeral]       = useState(0)
@@ -81,9 +55,137 @@ const profissionalAtual = usuario?.profissional ?? ''
   const [totalDinheiro,          setTotalDinheiro]          = useState(0)
   const [totalCartao,            setTotalCartao]            = useState(0)
   const [totalFicha,             setTotalFicha]             = useState(0)
-  const [totalAcertoFicha,      setTotalAcertoFicha]       = useState(0)
   const [movimentacoes,          setMovimentacoes]          = useState<Movimentacao[]>([])
   const [dadosGrafico,           setDadosGrafico]           = useState<{ data: string; valor: number }[]>([])
+
+  const verTudo = usuario?.permissoes.verTudo ?? false
+  const profissionalAtual = usuario?.profissional ?? ''
+
+  const carregarRelatorios = useCallback(async () => {
+    setLoading(true)
+    try {
+      const agora = new Date()
+      let dataInicio = new Date()
+
+      if (periodo === 'hoje') {
+        dataInicio.setHours(0, 0, 0, 0)
+      } else if (periodo === '7dias') {
+        dataInicio.setDate(agora.getDate() - 7)
+      } else if (periodo === 'mes') {
+        dataInicio = new Date(agora.getFullYear(), agora.getMonth(), 1)
+      } else if (periodo === 'ano') {
+        dataInicio = new Date(agora.getFullYear(), 0, 1)
+      }
+
+      let query = supabase
+        .from('movimentacoes_caixa')
+        .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento')
+        .gte('created_at', dataInicio.toISOString())
+        .order('created_at', { ascending: false })
+
+      if (!verTudo) {
+        query = query.eq('profissional', profissionalAtual)
+      }
+
+      const { data: movs, error: errMovs } = await query
+      if (errMovs) throw errMovs
+
+      const { data: fichaRows, error: errFicha } = await supabase
+        .from('historico_ficha')
+        .select('valor')
+        .gte('created_at', dataInicio.toISOString())
+
+      if (errFicha) throw errFicha
+
+      const saldoLiquidoFicha = (fichaRows || []).reduce(
+        (acc, row) => acc + Number(row.valor), 0
+      )
+
+      const listaMovs = (movs as Movimentacao[]) || []
+
+      let totalGabriel = 0
+      let totalEduardo = 0
+      let totalGeral   = 0
+      let totalGlobal  = 0
+      let entradas     = 0
+      let saidas       = 0
+      let pix          = 0
+      let dinheiro     = 0
+      let cartao       = 0
+
+      const listaFiltrada: Movimentacao[] = []
+
+      for (const m of listaMovs) {
+        const valor = Number(m.valor) || 0
+
+        if (m.tipo === 'entrada') {
+          entradas += valor
+
+          const forma = detectarFormaPagamento(m)
+          const motivo = (m.motivo || '').toLowerCase()
+
+          if (motivo.includes('[acerto via caixa]') || motivo.includes('[pagamento ficha]')) {
+            totalGlobal += valor
+            if (forma === 'pix')           pix      += valor
+            else if (forma === 'dinheiro') dinheiro += valor
+            else if (forma === 'cartao')   cartao   += valor
+            if (verTudo) listaFiltrada.push(m)
+            continue
+          }
+
+          if (forma === 'pix')           pix      += valor
+          else if (forma === 'dinheiro') dinheiro += valor
+          else if (forma === 'cartao')   cartao   += valor
+
+          const profLower = (m.profissional || '').toLowerCase()
+
+          if (profLower === 'gabriel') {
+            totalGabriel += valor
+            if (verTudo || profissionalAtual.toLowerCase() === 'gabriel')
+              listaFiltrada.push(m)
+          } else if (profLower === 'eduardo') {
+            totalEduardo += valor
+            if (verTudo || profissionalAtual.toLowerCase() === 'eduardo')
+              listaFiltrada.push(m)
+          } else {
+            totalGeral += valor
+            if (verTudo) listaFiltrada.push(m)
+          }
+
+          totalGlobal += valor
+        } else {
+          saidas += valor
+          if (verTudo) listaFiltrada.push(m)
+        }
+      }
+
+      const porDia: Record<string, number> = {}
+      for (const mov of listaMovs) {
+        if (mov.tipo !== 'entrada') continue
+        const d = new Date(mov.created_at).toLocaleDateString('pt-BR')
+        porDia[d] = (porDia[d] || 0) + Number(mov.valor || 0)
+      }
+
+      setDadosGrafico(Object.entries(porDia).map(([data, valor]) => ({ data, valor })))
+      setFaturamentoGabriel(totalGabriel)
+      setFaturamentoEduardo(totalEduardo)
+      setFaturamentoGeral(totalGeral)
+      setFaturamentoTotalGlobal(totalGlobal)
+      setMovimentacoes(listaFiltrada)
+      setTotalEntradas(entradas)
+      setTotalSaidas(saidas)
+      setLucroLiquido(entradas - saidas)
+      setTotalPix(pix)
+      setTotalDinheiro(dinheiro)
+      setTotalCartao(cartao)
+      setTotalFicha(Math.max(0, saldoLiquidoFicha))
+    } catch (err: unknown) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodo, usuario])
 
   useEffect(() => {
     setAbasAbertas(new Set(abasVisiveis))
@@ -104,184 +206,20 @@ const profissionalAtual = usuario?.profissional ?? ''
     })
   }
 
-  // ─── Carga de dados ────────────────────────────────────────────────────────
-  const carregarRelatorios = useCallback(async () => {
-    setLoading(true)
-    try {
-      const agora = new Date()
-      let dataInicio = new Date()
+  if (negado) return null
 
-      if (periodo === 'hoje') {
-        dataInicio.setHours(0, 0, 0, 0)
-      } else if (periodo === '7dias') {
-        dataInicio.setDate(agora.getDate() - 7)
-      } else if (periodo === 'mes') {
-        dataInicio = new Date(agora.getFullYear(), agora.getMonth(), 1)
-      } else if (periodo === 'ano') {
-        dataInicio = new Date(agora.getFullYear(), 0, 1)
-      }
-
-let query = supabase
-  .from('movimentacoes_caixa')
-  .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento')
-  .gte('created_at', dataInicio.toISOString())
-  .order('created_at', { ascending: false })
-
-if (!verTudo) {
-  query = query.eq('profissional', profissionalAtual)
-}
-
-const { data: movs, error: errMovs } = await query
-
-      if (errMovs) throw errMovs
-
-      // Busca historico_ficha para calcular saldo líquido real das fichas
-      // (débitos positivos = consumos, créditos negativos = acertos pagos)
-      const { data: fichaRows, error: errFicha } = await supabase
-        .from('historico_ficha')
-        .select('valor')
-        .gte('created_at', dataInicio.toISOString())
-
-      if (errFicha) throw errFicha
-
-      // Saldo líquido = soma de todos os valores (positivos - negativos)
-      // Se positivo: ainda há dívida pendente; se zero/negativo: tudo quitado
-      const saldoLiquidoFicha = (fichaRows || []).reduce(
-        (acc, row) => acc + Number(row.valor), 0
-      )
-
-      const listaMovs = (movs as Movimentacao[]) || []
-const role = verTudo ? 'Caixa' : profissionalAtual
-
-      // ── Contadores ────────────────────────────────────────────────────────
-      let totalGabriel = 0
-      let totalEduardo = 0
-      let totalGeral   = 0
-      let totalGlobal  = 0
-      let entradas     = 0
-      let saidas       = 0
-      let pix          = 0
-      let dinheiro     = 0
-      let cartao       = 0
-      let ficha        = 0
-
-      const listaFiltrada: Movimentacao[] = []
-
-      for (const m of listaMovs) {
-        const valor = Number(m.valor) || 0
-
-        if (m.tipo === 'entrada') {
-          entradas += valor
-
-          // Detecta forma de pagamento (campo dedicado ou fallback no motivo)
-          const forma = detectarFormaPagamento(m)
-          const motivo = (m.motivo || '').toLowerCase()
-
-          // Acertos de ficha entram no faturamento geral e nas formas de pagamento
-          // mas NÃO somam para nenhum barbeiro (são quitações de dívida, não serviços)
-          if (motivo.includes('[acerto via caixa]') || motivo.includes('[pagamento ficha]')) {
-            totalGlobal += valor
-            if (forma === 'pix')           pix      += valor
-            else if (forma === 'dinheiro') dinheiro += valor
-            else if (forma === 'cartao')   cartao   += valor
-            if (role === 'Admin' || role === 'Caixa') listaFiltrada.push(m)
-            continue
-          }
-
-          // Contabiliza forma de pagamento para lançamentos normais
-          if (forma === 'pix')           pix      += valor
-          else if (forma === 'dinheiro') dinheiro += valor
-          else if (forma === 'cartao')   cartao   += valor
-          // ficha é calculada via historico_ficha abaixo (saldo líquido real)
-
-          // Conta separado os acertos de ficha recebidos (motivo contém [Acerto via Caixa])
-          const motivoMov = (m.motivo || '').toLowerCase()
-          if (motivoMov.includes('[acerto via caixa]')) {
-            // soma no total de acertos — já foi somado na forma de pagamento acima (pix/dinheiro/cartao)
-            // então apenas registramos para o card dedicado
-          }
-
-          // BUG 2: comparação case-insensitive para pegar "Gabriel", "GABRIEL", "gabriel"
-          const profLower = (m.profissional || '').toLowerCase()
-
-          if (profLower === 'gabriel') {
-            totalGabriel += valor
-            if (role === 'Admin' || role === 'Caixa' || role === 'Barber Gabriel')
-              listaFiltrada.push(m)
-          } else if (profLower === 'eduardo') {
-            totalEduardo += valor
-            if (role === 'Admin' || role === 'Caixa' || role === 'Barber Eduardo')
-              listaFiltrada.push(m)
-          } else {
-            // Lançamentos sem profissional ou "Caixa"/"Geral" = balcão
-            totalGeral += valor
-            if (role === 'Admin' || role === 'Caixa') listaFiltrada.push(m)
-          }
-
-          totalGlobal += valor
-        } else {
-          // saídas (sangrias)
-          saidas += valor
-          if (role === 'Admin' || role === 'Caixa') listaFiltrada.push(m)
-        }
-      }
-
-      // Agrupa por dia para o gráfico
-      const porDia: Record<string, number> = {}
-      for (const mov of listaMovs) {
-        if (mov.tipo !== 'entrada') continue
-        const d = new Date(mov.created_at).toLocaleDateString('pt-BR')
-        porDia[d] = (porDia[d] || 0) + Number(mov.valor || 0)
-      }
-
-      setDadosGrafico(Object.entries(porDia).map(([data, valor]) => ({ data, valor })))
-      setFaturamentoGabriel(totalGabriel)
-      setFaturamentoEduardo(totalEduardo)
-      setFaturamentoGeral(totalGeral)
-      setFaturamentoTotalGlobal(totalGlobal)
-      // CORREÇÃO BUG 2: movimentacoes agora usa a lista filtrada por role corretamente
-      setMovimentacoes(listaFiltrada)
-      setTotalEntradas(entradas)
-      setTotalSaidas(saidas)
-      setLucroLiquido(entradas - saidas)
-      setTotalPix(pix)
-      setTotalDinheiro(dinheiro)
-      setTotalCartao(cartao)
-      // Card "Consumo em Ficha" = saldo líquido real do historico_ficha no período
-      // Mostra apenas o que ainda está pendente (pendurado - já acertado)
-      setTotalFicha(Math.max(0, saldoLiquidoFicha))
-    } catch (err: unknown) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, usuario])
-if (negado) return null
   const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen bg-black text-white font-sans antialiased selection:bg-white selection:text-black">
       <Sidebar />
 
       <main className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6">
 
-        {/* CONTROLE DO PERFIL ATIVO */}
-        <div className="bg-zinc-900/10 backdrop-blur-md border border-zinc-800/80 p-3.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[10px] font-bold tracking-wider uppercase text-zinc-500 shadow-xl">
-          <div className="flex items-center gap-2">
-            <Shield className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Visualizando como: <strong className="text-zinc-200">{usuario?.profissional ?? ''}</strong></span>
-          </div>
-          <select
-            value={usuario?.profissional ?? ''}
-            onChange={(e) => setusuario({ nome: e.target.value, role: e.target.value as UserRole })}
-            className="w-full sm:w-auto bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-1.5 text-zinc-300 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all cursor-pointer"
-          >
-            <option value="Caixa">Caixa (Vê tudo separado)</option>
-            <option value="Barber Gabriel">Barber Gabriel (Apenas dados dele)</option>
-            <option value="Barber Eduardo">Barber Eduardo (Apenas dados dele)</option>
-          </select>
+        {/* PERFIL ATIVO */}
+        <div className="bg-zinc-900/10 backdrop-blur-md border border-zinc-800/80 p-3.5 rounded-2xl flex items-center gap-2 text-[10px] font-bold tracking-wider uppercase text-zinc-500 shadow-xl">
+          <Shield className="w-3.5 h-3.5 text-zinc-400" />
+          <span>Visualizando como: <strong className="text-zinc-200">{profissionalAtual}</strong></span>
         </div>
 
         {/* CABEÇALHO */}
@@ -293,7 +231,6 @@ if (negado) return null
             </p>
           </div>
 
-          {/* FILTROS DE PERÍODO */}
           <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/80 text-[10px] font-bold tracking-wider uppercase">
             {(['hoje', '7dias', 'mes', 'ano'] as const).map((p) => (
               <button
@@ -319,7 +256,7 @@ if (negado) return null
         ) : (
           <div className="space-y-3">
             {TABS.map((tab) => {
-              const aberta   = abasVisiveis.has(tab.id)
+              const aberta    = abasVisiveis.has(tab.id)
               const jaMontada = abasAbertas.has(tab.id)
 
               return (
@@ -327,7 +264,6 @@ if (negado) return null
                   key={tab.id}
                   className="rounded-2xl border border-zinc-800/80 bg-zinc-900/10 backdrop-blur-md shadow-xl overflow-hidden"
                 >
-                  {/* HEADER DA ABA */}
                   <button
                     onClick={() => toggleAba(tab.id)}
                     className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-zinc-800/20 transition-colors"
@@ -343,11 +279,10 @@ if (negado) return null
 
                   <div className={jaMontada ? (aberta ? 'block' : 'hidden') : 'hidden'}>
 
-                    {/* ── ABA: FINANCEIRO ─────────────────────────────────── */}
+                    {/* ── FINANCEIRO ── */}
                     {tab.id === 'financeiro' && (
                       <div className="p-4 md:p-5 pt-0 space-y-4">
                         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-
                           <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                             <div className="flex justify-between items-center mb-3">
                               <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Entradas</span>
@@ -387,7 +322,7 @@ if (negado) return null
                           </div>
                         </div>
 
-                        {( {usuario?.profissional ?? ''}=== 'Admin' ||  {usuario?.profissional ?? ''} === 'Caixa') && (
+                        {verTudo && (
                           <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div>
                               <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Faturamento Bruto Total</h3>
@@ -403,9 +338,9 @@ if (negado) return null
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                           {[
-                            { label: 'Dinheiro',       valor: totalDinheiro, cor: 'text-yellow-400', desc: 'Recebido em espécie'          },
-                            { label: 'Cartão',         valor: totalCartao,   cor: 'text-purple-400', desc: 'Débito e crédito'             },
-                            { label: 'Consumo em Ficha', valor: totalFicha,  cor: 'text-orange-400', desc: 'Pendurado — ainda não recebido' },
+                            { label: 'Dinheiro',         valor: totalDinheiro, cor: 'text-yellow-400', desc: 'Recebido em espécie'           },
+                            { label: 'Cartão',           valor: totalCartao,   cor: 'text-purple-400', desc: 'Débito e crédito'              },
+                            { label: 'Consumo em Ficha', valor: totalFicha,    cor: 'text-orange-400', desc: 'Pendurado — ainda não recebido' },
                           ].map(({ label, valor, cor, desc }) => (
                             <div key={label} className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
@@ -420,13 +355,12 @@ if (negado) return null
                       </div>
                     )}
 
-                    {/* ── ABA: BARBEIROS ──────────────────────────────────── */}
+                    {/* ── BARBEIROS ── */}
                     {tab.id === 'barbeiros' && (
                       <div className="p-4 md:p-5 pt-0">
-                        {/* CORREÇÃO BUG 5: cada card exibe o valor correto do barbeiro */}
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
 
-                          {({usuario?.profissional ?? ''} === 'Admin' || {usuario?.profissional ?? ''} === 'Caixa' || {usuario?.profissional ?? ''} === 'Barber Gabriel') && (
+                          {(verTudo || profissionalAtual.toLowerCase() === 'gabriel') && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
                                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Barber Gabriel</span>
@@ -437,7 +371,7 @@ if (negado) return null
                             </div>
                           )}
 
-                          {({usuario?.profissional ?? ''} === 'Admin' || {usuario?.profissional ?? ''} === 'Caixa' || {usuario?.profissional ?? ''} === 'Barber Eduardo') && (
+                          {(verTudo || profissionalAtual.toLowerCase() === 'eduardo') && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
                                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Barber Eduardo</span>
@@ -448,7 +382,7 @@ if (negado) return null
                             </div>
                           )}
 
-                          {({usuario?.profissional ?? ''} === 'Admin' || {usuario?.profissional ?? ''} === 'Caixa') && (
+                          {verTudo && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
                                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Faturamento Balcão</span>
@@ -462,7 +396,7 @@ if (negado) return null
                       </div>
                     )}
 
-                    {/* ── ABA: GRÁFICO ────────────────────────────────────── */}
+                    {/* ── GRÁFICO ── */}
                     {tab.id === 'grafico' && (
                       <div className="p-4 md:p-5 pt-0">
                         <div className="flex items-center justify-between mb-4">
@@ -477,20 +411,14 @@ if (negado) return null
                             <AreaChart data={dadosGrafico}>
                               <XAxis dataKey="data" stroke="#71717a" fontSize={10} />
                               <Tooltip formatter={(value) => brl(Number(value))} />
-                              <Area
-                                type="monotone"
-                                dataKey="valor"
-                                stroke="#10b981"
-                                fill="#10b98122"
-                                strokeWidth={3}
-                              />
+                              <Area type="monotone" dataKey="valor" stroke="#10b981" fill="#10b98122" strokeWidth={3} />
                             </AreaChart>
                           </ResponsiveContainer>
                         </div>
                       </div>
                     )}
 
-                    {/* ── ABA: LANÇAMENTOS ─────────────────────────────────── */}
+                    {/* ── LANÇAMENTOS ── */}
                     {tab.id === 'lancamentos' && (
                       <div className="overflow-x-auto">
                         <table className="w-full border-collapse">
