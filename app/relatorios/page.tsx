@@ -151,7 +151,7 @@ const { data: movs, error: errMovs } = await query
       )
 
       const listaMovs = (movs as Movimentacao[]) || []
-      const role = usuarioLogado.role
+const role = verTudo ? 'Caixa' : profissionalAtual
 
       // ── Contadores ────────────────────────────────────────────────────────
       let totalGabriel = 0
