@@ -42,16 +42,21 @@ export default function LoginPage() {
         <div className="flex flex-col items-center gap-4">
           <div className="relative w-20 h-20">
             <Image
-              src="/logo.png"
-              alt="Dom Black"
+              src="https://i.imgur.com/LBasEik.png"
+              alt="Dom Black Barbearia"
               fill
-              className="object-contain"
+              className="w-full h-full object-contain scale-150"
+              draggable={false}
               priority
             />
           </div>
-          <div className="text-center">
-            <h1 className="text-white font-black tracking-[0.3em] uppercase text-xl">Dom Black</h1>
-            <p className="text-zinc-500 text-[10px] tracking-widest uppercase mt-1">Sistema de Gestão</p>
+            <div className="text-center">
+            <h2 className="text-3xl font-black tracking-[0.30em] text-white uppercase">
+              Dom Black
+            </h2>
+            <p className="mt-1 text-[11px] tracking-[0.35em] text-zinc-500 uppercase font-semibold">
+              Barbearia Premium
+            </p>
           </div>
         </div>
 
@@ -104,6 +109,9 @@ export default function LoginPage() {
         <p className="text-center text-zinc-700 text-[10px] tracking-widest uppercase">
           © {new Date().getFullYear()} Barbearia Dom Black
         </p>
+          <footer className="text-center text-zinc-600 text-[11px] tracking-[0.2em] uppercase">
+    © 2026 JOAO LUCAS SANTOS - Todos os direitos reservados.
+  </footer>
       </div>
     </div>
   )
