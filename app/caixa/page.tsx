@@ -63,7 +63,7 @@ export default function CaixaPDVPage() {
 
   // ── Guard: só quem tem permissão 'caixa' acessa ──────────────────────────────
   const { usuario, negado } = useGuard('caixa')
-  if (negado) return null
+
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [itensDisponiveis, setItensDisponiveis] = useState<ItemVenda[]>([])
   const [caixaAtivo, setCaixaAtivo] = useState<Caixa | null>(null)
