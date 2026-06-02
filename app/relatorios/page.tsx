@@ -6,8 +6,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { supabase } from '@/lib/supabase'
 import { DollarSign, User, Shield, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts'
-const { usuario, negado } = useGuard('estoque')
-if (negado) return null
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 type UserRole = 'Admin' | 'Caixa' | 'Barber Gabriel' | 'Barber Eduardo'
@@ -58,6 +57,8 @@ const TABS: { id: TabId; label: string }[] = [
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function CaixaRelatoriosPage() {
+  const { usuario, negado } = useGuard('relatorios')
+if (negado) return null
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState<'hoje' | '7dias' | 'mes' | 'ano'>('mes')
 
