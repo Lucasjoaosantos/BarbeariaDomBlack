@@ -14,7 +14,7 @@ interface Fechamento {
 }
 
 export default function HistoricoCaixaPage() {
-  const { usuario, negado } = useGuard('historico')
+  const { usuario, negado } = useGuard('caixa')
 if (negado) return null
   const [fechamentos, setFechamentos] = useState<Fechamento[]>([])
 
