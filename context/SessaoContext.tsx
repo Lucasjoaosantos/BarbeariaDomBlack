@@ -23,7 +23,7 @@ export function SessaoProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Lê o usuário que foi salvo no login (sessionStorage para durar só a sessão)
-    const salvo = sessionStorage.getItem('usuario_logado')
+    const salvo = localStorage.getItem('usuario_logado')
     if (salvo) {
       const encontrado = buscarUsuario(salvo)
       setUsuario(encontrado)
