@@ -24,6 +24,7 @@ export interface Usuario {
     relatorios: boolean  // Relatórios
     historico: boolean  
     fichas: boolean  
+    servicos: boolean  
     // Se true, vê relatórios/movimentações de TODOS. Se false, só os seus.
     verTudo: boolean
   }
