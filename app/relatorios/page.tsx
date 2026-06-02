@@ -256,7 +256,7 @@ const role = verTudo ? 'Caixa' : profissionalAtual
       setLoading(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, usuarioLogado])
+  }, [periodo, usuario])
 if (negado) return null
   const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
