@@ -70,7 +70,7 @@ localStorage.setItem('usuario_logado', encontrado.usuario)
               onChange={e => setUsuario(e.target.value)}
               autoComplete="username"
               className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors"
-              placeholder="seu usuário"
+              placeholder="Digite o usuário..."
             />
           </div>
 
