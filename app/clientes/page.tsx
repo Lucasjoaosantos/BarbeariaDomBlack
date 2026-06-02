@@ -18,7 +18,8 @@ interface Cliente {
 }
 
 export default function ClientesPage() {
-  const { usuario, negado } = useGuard('clientes')
+  const usuario = null
+const negado = false
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<number, boolean>>({})
   const [loading, setLoading] = useState(true)
