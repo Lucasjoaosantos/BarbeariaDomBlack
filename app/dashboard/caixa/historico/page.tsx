@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Sidebar } from '@/components/Sidebar'
-
+const { usuario, negado } = useGuard('estoque')
+if (negado) return null
 interface Fechamento {
   id: number
   valor_final: number
