@@ -59,7 +59,7 @@ const TABS: { id: TabId; label: string }[] = [
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function CaixaRelatoriosPage() {
   const { usuario, negado } = useGuard('relatorios')
-if (negado) return null
+
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState<'hoje' | '7dias' | 'mes' | 'ano'>('mes')
 
@@ -253,7 +253,7 @@ if (negado) return null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo, usuarioLogado])
-
+if (negado) return null
   const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
   // ─── Render ────────────────────────────────────────────────────────────────
