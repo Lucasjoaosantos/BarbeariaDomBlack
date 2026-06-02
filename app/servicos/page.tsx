@@ -5,8 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Sidebar } from '@/components/Sidebar'
 import { NovoServicoModal } from '@/components/NovoServicoModal'
-const { usuario, negado } = useGuard('estoque')
-if (negado) return null
+
 interface Servico {
   id: number
   nome: string
@@ -17,6 +16,8 @@ interface Servico {
 }
 
 export default function ServicosPage() {
+  const { usuario, negado } = useGuard('servicos')
+if (negado) return null
   const [servicos, setServicos] = useState<Servico[]>([])
   const [loading, setLoading] = useState(true)
 
