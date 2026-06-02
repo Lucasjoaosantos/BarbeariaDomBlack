@@ -121,11 +121,17 @@ const profissionalAtual = usuario?.profissional ?? ''
         dataInicio = new Date(agora.getFullYear(), 0, 1)
       }
 
-      const { data: movs, error: errMovs } = await supabase
-        .from('movimentacoes_caixa')
-        .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento')
-        .gte('created_at', dataInicio.toISOString())
-        .order('created_at', { ascending: false })
+let query = supabase
+  .from('movimentacoes_caixa')
+  .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento')
+  .gte('created_at', dataInicio.toISOString())
+  .order('created_at', { ascending: false })
+
+if (!verTudo) {
+  query = query.eq('profissional', profissionalAtual)
+}
+
+const { data: movs, error: errMovs } = await query
 
       if (errMovs) throw errMovs
 
