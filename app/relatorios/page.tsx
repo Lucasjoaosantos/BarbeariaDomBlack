@@ -66,10 +66,8 @@ export default function CaixaRelatoriosPage() {
   const [abasAbertas,  setAbasAbertas]  = useState<Set<TabId>>(new Set())
   const [abasVisiveis, setAbasVisiveis] = useState<Set<TabId>>(new Set())
 
-  const [usuarioLogado, setUsuarioLogado] = useState<{ nome: string; role: UserRole }>({
-    nome: 'Caixa',
-    role: 'Caixa',
-  })
+const verTudo = usuario?.permissoes.verTudo ?? false
+const profissionalAtual = usuario?.profissional ?? ''
 
   // Dados financeiros
   const [faturamentoGabriel,     setFaturamentoGabriel]     = useState(0)
