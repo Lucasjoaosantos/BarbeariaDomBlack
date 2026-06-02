@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Pencil, Trash2 } from 'lucide-react'
+import { useGuard } from '@/hooks/useGuard'
 
 interface ItemTabela {
   id: number
