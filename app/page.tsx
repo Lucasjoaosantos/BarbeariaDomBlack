@@ -28,7 +28,7 @@ export default function LoginPage() {
     }
 
     sessionStorage.setItem('usuario_logado', encontrado.usuario)
-    document.cookie = 'domblack_session=autenticado; path=/; SameSite=Lax'; Max-Age=86400'
+    document.cookie = 'domblack_session=autenticado; path=/; SameSite=Lax'; Max-Age=86400
     window.location.href = encontrado.rotaInicial
   }
 
