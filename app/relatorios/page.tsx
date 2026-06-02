@@ -89,7 +89,7 @@ const profissionalAtual = usuario?.profissional ?? ''
     setAbasAbertas(new Set(abasVisiveis))
     carregarRelatorios()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, usuarioLogado])
+  }, [periodo, usuario])
 
   function toggleAba(id: TabId) {
     setAbasVisiveis((prev) => {
