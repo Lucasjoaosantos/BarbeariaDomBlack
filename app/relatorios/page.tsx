@@ -6,7 +6,8 @@ import { Sidebar } from '@/components/Sidebar'
 import { supabase } from '@/lib/supabase'
 import { DollarSign, User, Shield, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts'
-
+const { usuario, negado } = useGuard('estoque')
+if (negado) return null
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 type UserRole = 'Admin' | 'Caixa' | 'Barber Gabriel' | 'Barber Eduardo'
