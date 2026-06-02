@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Pencil, Trash2 } from 'lucide-react'
-
+const { usuario, negado } = useGuard('estoque')
+if (negado) return null
 interface ItemTabela {
   id: number
   nome: string
