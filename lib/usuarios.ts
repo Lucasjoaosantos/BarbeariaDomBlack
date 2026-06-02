@@ -22,6 +22,7 @@ export interface Usuario {
     estoque: boolean     // Controle de Estoque
     clientes: boolean    // Gestão de Clientes
     relatorios: boolean  // Relatórios
+    historico: boolean  
     // Se true, vê relatórios/movimentações de TODOS. Se false, só os seus.
     verTudo: boolean
   }
