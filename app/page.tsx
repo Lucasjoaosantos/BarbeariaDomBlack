@@ -43,7 +43,7 @@ localStorage.setItem('usuario_logado', encontrado.usuario)
               src="https://i.imgur.com/LBasEik.png"
               alt="Dom Black Barbearia"
               fill
-              className="w-full h-full object-contain scale-150"
+              className="w-full h-full object-contain scale-200"
               draggable={false}
               priority
             />
