@@ -7,8 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { NovaEntradaEstoqueModal } from '@/components/NovaEntradaEstoqueModal'
 import { NovaSaidaEstoqueModal } from '@/components/NovaSaidaEstoqueModal'
 import { PackageOpen, History } from 'lucide-react'
-const { usuario, negado } = useGuard('estoque')
-if (negado) return null
+
 
 interface ProdutoSaldo {
   id: number
@@ -28,6 +27,8 @@ interface Movimentacao {
 }
 
 export default function EstoquePage() {
+  const { usuario, negado } = useGuard('estoque')
+if (negado) return null
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([])
   const [produtosSaldos, setProdutosSaldos] = useState<ProdutoSaldo[]>([])
   const [loading, setLoading] = useState(true)
