@@ -134,8 +134,11 @@ export default function CaixaPDVPage() {
         ])
 
         const produtosFormatados: ItemVenda[] = (resProdutos.data || []).map(p => ({
-          id: p.id, nome: p.nome, preco_venda: p.preco_venda || p.preco,
-          tipo: 'produto', estoque: p.estoque
+          id: p.id,
+          nome: p.nome, 
+          preco_venda: p.preco_venda,
+          tipo: 'produto', 
+          estoque: p.estoque
         }))
         const servicosFormatados: ItemVenda[] = (resServicos.data || []).map(s => ({
           id: s.id, nome: s.nome, preco: s.preco, tipo: 'servico'
