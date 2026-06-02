@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Trash2, Plus, Receipt } from 'lucide-react'
-
+const { usuario, negado } = useGuard('estoque')
+if (negado) return null
 interface Cliente {
   id: number
   nome: string
