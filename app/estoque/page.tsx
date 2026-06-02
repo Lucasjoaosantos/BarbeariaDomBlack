@@ -7,7 +7,8 @@ import { supabase } from '@/lib/supabase'
 import { NovaEntradaEstoqueModal } from '@/components/NovaEntradaEstoqueModal'
 import { NovaSaidaEstoqueModal } from '@/components/NovaSaidaEstoqueModal'
 import { PackageOpen, History } from 'lucide-react'
-
+const { usuario, negado } = useGuard('estoque')
+if (negado) return null
 
 interface ProdutoSaldo {
   id: number
