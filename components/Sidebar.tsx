@@ -31,6 +31,8 @@ export function Sidebar() {
 
   function handleLogout() {
     sessionStorage.removeItem('usuario_logado')
+      document.cookie = 'domblack_session=; path=/; max-age=0'
+
     router.push('/')
   }
 
