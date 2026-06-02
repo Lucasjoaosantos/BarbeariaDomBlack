@@ -5,8 +5,7 @@ import { useEffect, useState, Fragment } from 'react'
 import { Sidebar } from '@/components/Sidebar'
 import { supabase } from '@/lib/supabase'
 import { NovoClienteModal } from '@/components/NovoClienteModal'
-const { usuario, negado } = useGuard('estoque')
-if (negado) return null
+
 interface Cliente {
   id: number
   nome: string
@@ -18,6 +17,8 @@ interface Cliente {
 }
 
 export default function ClientesPage() {
+  const { usuario, negado } = useGuard('clientes')
+if (negado) return null
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<number, boolean>>({})
   const [loading, setLoading] = useState(true)
