@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { NovaEntradaEstoqueModal } from '@/components/NovaEntradaEstoqueModal'
 import { NovaSaidaEstoqueModal } from '@/components/NovaSaidaEstoqueModal'
 import { PackageOpen, History } from 'lucide-react'
+import { useGuard } from '@/hooks/useGuard'
 
 
 interface ProdutoSaldo {
