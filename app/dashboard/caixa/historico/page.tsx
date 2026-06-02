@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Sidebar } from '@/components/Sidebar'
-const { usuario, negado } = useGuard('estoque')
-if (negado) return null
+
 interface Fechamento {
   id: number
   valor_final: number
@@ -14,6 +13,8 @@ interface Fechamento {
 }
 
 export default function HistoricoCaixaPage() {
+  const { usuario, negado } = useGuard('historico')
+if (negado) return null
   const [fechamentos, setFechamentos] = useState<Fechamento[]>([])
 
   useEffect(() => {
