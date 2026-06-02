@@ -5,6 +5,7 @@ import { useEffect, useState, Fragment } from 'react'
 import { Sidebar } from '@/components/Sidebar'
 import { supabase } from '@/lib/supabase'
 import { NovoClienteModal } from '@/components/NovoClienteModal'
+import { useGuard } from '@/hooks/useGuard'
 
 interface Cliente {
   id: number
