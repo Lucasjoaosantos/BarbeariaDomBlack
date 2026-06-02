@@ -33,22 +33,21 @@ localStorage.setItem('usuario_logado', encontrado.usuario)
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm space-y-8">
+    <div className="flex min-h-screen items-center justify-center bg-black px-4 text-white font-sans antialiased selection:bg-white selection:text-black">
 
-        {/* Logo */}
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative w-20 h-20">
-            <Image
+      <div className="w-full max-w-md space-y-8 rounded-3xl border border-zinc-800/60 bg-zinc-900/40 p-10 shadow-2xl backdrop-blur-md">
+
+        <div className="flex flex-col items-center justify-center space-y-2">
+          <div className="h-36 w-36 overflow-hidden flex items-center justify-center">
+            <img
               src="https://i.imgur.com/LBasEik.png"
               alt="Dom Black Barbearia"
-              fill
               className="w-full h-full object-contain scale-150"
               draggable={false}
-              priority
             />
           </div>
-            <div className="text-center">
+
+          <div className="text-center">
             <h2 className="text-3xl font-black tracking-[0.30em] text-white uppercase">
               Dom Black
             </h2>
