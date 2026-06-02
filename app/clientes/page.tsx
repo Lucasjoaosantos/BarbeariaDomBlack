@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 'use client'
-//import { useGuard } from '@/hooks/useGuard'
+import { useGuard } from '@/hooks/useGuard'
 import { useEffect, useState, Fragment } from 'react'
 import { Sidebar } from '@/components/Sidebar'
 import { supabase } from '@/lib/supabase'
