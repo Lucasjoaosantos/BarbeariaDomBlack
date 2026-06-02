@@ -10,8 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Trash2, Plus, Receipt } from 'lucide-react'
-const { usuario, negado } = useGuard('estoque')
-if (negado) return null
+
 interface Cliente {
   id: number
   nome: string
@@ -61,6 +60,8 @@ let _cacheProdutosServicos: ItemVenda[] | null = null
 let _cacheClientes: Cliente[] | null = null
 
 export default function CaixaPDVPage() {
+  const { usuario, negado } = useGuard('caixa')
+if (negado) return null
   // ── Guard: só quem tem permissão 'caixa' acessa ──────────────────────────────
   const { usuario, negado } = useGuard('caixa')
 
