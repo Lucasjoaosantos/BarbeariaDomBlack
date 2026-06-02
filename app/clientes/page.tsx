@@ -19,7 +19,6 @@ interface Cliente {
 
 export default function ClientesPage() {
   const { usuario, negado } = useGuard('clientes')
-if (negado) return null
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [linhasExpandidas, setLinhasExpandidas] = useState<Record<number, boolean>>({})
   const [loading, setLoading] = useState(true)
@@ -27,7 +26,7 @@ if (negado) return null
   useEffect(() => {
     carregarDados()
   }, [])
-
+  if (negado) return null
   async function carregarDados() {
     setLoading(true)
     try {
