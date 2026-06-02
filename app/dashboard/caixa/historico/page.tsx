@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Sidebar } from '@/components/Sidebar'
+import { useGuard } from '@/hooks/useGuard'
 
 interface Fechamento {
   id: number
