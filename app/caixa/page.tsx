@@ -60,11 +60,10 @@ let _cacheProdutosServicos: ItemVenda[] | null = null
 let _cacheClientes: Cliente[] | null = null
 
 export default function CaixaPDVPage() {
-  const { usuario, negado } = useGuard('caixa')
-if (negado) return null
+
   // ── Guard: só quem tem permissão 'caixa' acessa ──────────────────────────────
   const { usuario, negado } = useGuard('caixa')
-
+  if (negado) return null
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [itensDisponiveis, setItensDisponiveis] = useState<ItemVenda[]>([])
   const [caixaAtivo, setCaixaAtivo] = useState<Caixa | null>(null)
