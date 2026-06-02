@@ -9,30 +9,6 @@ const ROTAS_PROTEGIDAS = [
   '/clientes',
 ]
 
-async function handleLogin(e: React.FormEvent) {
-  e.preventDefault()
-  setErro('')
-  setCarregando(true)
-
-  await new Promise(r => setTimeout(r, 300))
-
-  const encontrado = autenticar(usuario, senha)
-
-  if (!encontrado) {
-    setErro('Usuário ou senha incorretos.')
-    setCarregando(false)
-    return
-  }
-
-  // Salva no sessionStorage para o SessaoContext ler
-  sessionStorage.setItem('usuario_logado', encontrado.usuario)
-
-  // Grava o cookie para o middleware liberar as rotas protegidas
-  document.cookie = 'domblack_session=autenticado; path=/; SameSite=Lax'
-
-  router.push(encontrado.rotaInicial)
-}
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
