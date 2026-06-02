@@ -1,12 +1,5 @@
 'use client'
 
-// ─── GUARD DE ROTA ────────────────────────────────────────────────────────────
-// Use no topo de cada page.tsx para proteger o acesso.
-//
-// Exemplo de uso:
-//   const { usuario, negado } = useGuard('estoque')
-//   if (negado) return null  // já redireciona automaticamente
-
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSessao } from '@/context/SessaoContext'
