@@ -23,6 +23,7 @@ export interface Usuario {
     clientes: boolean    // Gestão de Clientes
     relatorios: boolean  // Relatórios
     historico: boolean  
+    fichas: boolean  
     // Se true, vê relatórios/movimentações de TODOS. Se false, só os seus.
     verTudo: boolean
   }
