@@ -61,7 +61,6 @@ export default function CaixaRelatoriosPage() {
 
   const verTudo = usuario?.permissoes.verTudo ?? false
   const profissionalAtual = usuario?.profissional ?? ''
-  // proprietarioCaixa é o identificador do caixa do usuário logado (ex: 'gabriel', 'eduardo', 'caixa')
   const proprietarioCaixa = usuario?.proprietarioCaixa ?? 'caixa'
 
   const carregarRelatorios = useCallback(async () => {
@@ -80,11 +79,6 @@ export default function CaixaRelatoriosPage() {
         dataInicio = new Date(agora.getFullYear(), 0, 1)
       }
 
-      // ── CORREÇÃO PRINCIPAL ────────────────────────────────────────────────
-      // Antes: filtrava por `profissional` (campo de texto, inconsistente)
-      // Agora: filtra por `proprietario` (campo dedicado, gravado no insert)
-      // Admin/Caixa (verTudo=true) buscam tudo sem filtro
-      // Gabriel/Eduardo buscam apenas o próprio proprietario
       let query = supabase
         .from('movimentacoes_caixa')
         .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento, proprietario')
@@ -92,20 +86,17 @@ export default function CaixaRelatoriosPage() {
         .order('created_at', { ascending: false })
 
       if (!verTudo) {
-        // Filtra pelo proprietario do caixa do usuário logado
         query = query.eq('proprietario', proprietarioCaixa)
       }
 
       const { data: movs, error: errMovs } = await query
       if (errMovs) throw errMovs
 
-      // Ficha: barbeiros só veem a ficha dos clientes do próprio caixa
-      let fichaQuery = supabase
+      const { data: fichaRows, error: errFicha } = await supabase
         .from('historico_ficha')
         .select('valor')
         .gte('created_at', dataInicio.toISOString())
 
-      const { data: fichaRows, error: errFicha } = await fichaQuery
       if (errFicha) throw errFicha
 
       const saldoLiquidoFicha = (fichaRows || []).reduce(
@@ -129,34 +120,39 @@ export default function CaixaRelatoriosPage() {
       for (const m of listaMovs) {
         const valor = Number(m.valor) || 0
         const prop = (m.proprietario || 'caixa').toLowerCase()
+        const motivo = (m.motivo || '').toLowerCase()
 
         if (m.tipo === 'entrada') {
-          entradas += valor
-          totalGlobal += valor
+          // Acerto via caixa = liquidação de ficha já contabilizada antes
+          // Conta nas formas de pagamento mas NÃO soma no faturamento (evita duplicar)
+          const isAcerto = motivo.includes('[acerto via caixa]')
 
           const forma = detectarFormaPagamento(m)
           if (forma === 'pix')           pix      += valor
           else if (forma === 'dinheiro') dinheiro += valor
           else if (forma === 'cartao')   cartao   += valor
 
-          // Acumula por proprietário para o card de barbeiros
-          if (prop === 'gabriel')      totalGabriel += valor
-          else if (prop === 'eduardo') totalEduardo += valor
-          else                         totalGeral   += valor
+          if (!isAcerto) {
+            entradas    += valor
+            totalGlobal += valor
+            if (prop === 'gabriel')      totalGabriel += valor
+            else if (prop === 'eduardo') totalEduardo += valor
+            else                         totalGeral   += valor
+          }
 
           listaFiltrada.push(m)
 
         } else {
-          // saída (sangria)
           saidas += valor
           listaFiltrada.push(m)
         }
       }
 
-      // Gráfico: evolução diária
       const porDia: Record<string, number> = {}
       for (const mov of listaMovs) {
         if (mov.tipo !== 'entrada') continue
+        const motivo = (mov.motivo || '').toLowerCase()
+        if (motivo.includes('[acerto via caixa]')) continue // não duplica no gráfico
         const d = new Date(mov.created_at).toLocaleDateString('pt-BR')
         porDia[d] = (porDia[d] || 0) + Number(mov.valor || 0)
       }
