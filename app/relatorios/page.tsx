@@ -92,6 +92,7 @@ export default function CaixaRelatoriosPage() {
       const { data: movs, error: errMovs } = await query
       if (errMovs) throw errMovs
 
+      // Ficha pendente: soma dos débitos ainda não acertados no historico_ficha
       const { data: fichaRows, error: errFicha } = await supabase
         .from('historico_ficha')
         .select('valor')
@@ -118,41 +119,47 @@ export default function CaixaRelatoriosPage() {
       const listaFiltrada: Movimentacao[] = []
 
       for (const m of listaMovs) {
-        const valor = Number(m.valor) || 0
-        const prop = (m.proprietario || 'caixa').toLowerCase()
+        const valor  = Number(m.valor) || 0
+        const prop   = (m.proprietario || 'caixa').toLowerCase()
         const motivo = (m.motivo || '').toLowerCase()
 
         if (m.tipo === 'entrada') {
-          // Acerto via caixa = liquidação de ficha já contabilizada antes
-          // Conta nas formas de pagamento mas NÃO soma no faturamento (evita duplicar)
-          const isAcerto = motivo.includes('[acerto via caixa]')
+          const isConsumoFiado = motivo.includes('[consumo fiado]')
+          const isAcerto       = motivo.includes('[acerto via caixa]')
 
-          const forma = detectarFormaPagamento(m)
-          if (forma === 'pix')           pix      += valor
-          else if (forma === 'dinheiro') dinheiro += valor
-          else if (forma === 'cartao')   cartao   += valor
-
-          if (!isAcerto) {
+          // ── REGRA DE FATURAMENTO ─────────────────────────────────────────
+          // [CONSUMO FIADO]    → NÃO soma: dinheiro ainda não entrou, está pendente
+          // [ACERTO VIA CAIXA] → SOMA: é aqui que o dinheiro entrou de verdade
+          // Demais lançamentos → SOMA normalmente (venda à vista)
+          if (!isConsumoFiado) {
             entradas    += valor
             totalGlobal += valor
+
             if (prop === 'gabriel')      totalGabriel += valor
             else if (prop === 'eduardo') totalEduardo += valor
             else                         totalGeral   += valor
+
+            // Formas de pagamento: só conta quando o dinheiro realmente entrou
+            const forma = detectarFormaPagamento(m)
+            if (forma === 'pix')           pix      += valor
+            else if (forma === 'dinheiro') dinheiro += valor
+            else if (forma === 'cartao')   cartao   += valor
           }
 
           listaFiltrada.push(m)
 
         } else {
+          // Saída (sangria)
           saidas += valor
           listaFiltrada.push(m)
         }
       }
 
+      // Gráfico: só lançamentos que realmente entraram (sem consumo fiado)
       const porDia: Record<string, number> = {}
       for (const mov of listaMovs) {
         if (mov.tipo !== 'entrada') continue
-        const motivo = (mov.motivo || '').toLowerCase()
-        if (motivo.includes('[acerto via caixa]')) continue // não duplica no gráfico
+        if ((mov.motivo || '').toLowerCase().includes('[consumo fiado]')) continue
         const d = new Date(mov.created_at).toLocaleDateString('pt-BR')
         porDia[d] = (porDia[d] || 0) + Number(mov.valor || 0)
       }
@@ -287,7 +294,7 @@ export default function CaixaRelatoriosPage() {
                               <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
                             </div>
                             <div className="text-xl md:text-2xl font-black text-emerald-400 font-mono tracking-tight">{brl(totalEntradas)}</div>
-                            <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Total bruto recebido</p>
+                            <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Total efetivamente recebido</p>
                           </div>
 
                           <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
@@ -338,7 +345,7 @@ export default function CaixaRelatoriosPage() {
                           {[
                             { label: 'Dinheiro',         valor: totalDinheiro, cor: 'text-yellow-400', desc: 'Recebido em espécie'           },
                             { label: 'Cartão',           valor: totalCartao,   cor: 'text-purple-400', desc: 'Débito e crédito'              },
-                            { label: 'Consumo em Ficha', valor: totalFicha,    cor: 'text-orange-400', desc: 'Pendurado — ainda não recebido' },
+                            { label: 'Pendente em Ficha', valor: totalFicha,   cor: 'text-orange-400', desc: 'Consumido — ainda não recebido' },
                           ].map(({ label, valor, cor, desc }) => (
                             <div key={label} className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
@@ -365,7 +372,7 @@ export default function CaixaRelatoriosPage() {
                                 <User className="w-3.5 h-3.5 text-zinc-400" />
                               </div>
                               <div className="text-xl md:text-2xl font-bold text-zinc-100 font-mono tracking-tight">{brl(faturamentoGabriel)}</div>
-                              <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Serviços executados no período</p>
+                              <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Efetivamente recebido no período</p>
                             </div>
                           )}
 
@@ -376,7 +383,7 @@ export default function CaixaRelatoriosPage() {
                                 <User className="w-3.5 h-3.5 text-zinc-400" />
                               </div>
                               <div className="text-xl md:text-2xl font-bold text-zinc-100 font-mono tracking-tight">{brl(faturamentoEduardo)}</div>
-                              <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Serviços executados no período</p>
+                              <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Efetivamente recebido no período</p>
                             </div>
                           )}
 
@@ -400,7 +407,7 @@ export default function CaixaRelatoriosPage() {
                         <div className="flex items-center justify-between mb-4">
                           <div>
                             <h2 className="text-xs font-black uppercase tracking-widest text-zinc-300">Evolução do Faturamento</h2>
-                            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold mt-1">Crescimento financeiro no período</p>
+                            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold mt-1">Valores efetivamente recebidos por dia</p>
                           </div>
                           <TrendingUp className="w-5 h-5 text-emerald-400" />
                         </div>
@@ -436,21 +443,37 @@ export default function CaixaRelatoriosPage() {
                                 </td>
                               </tr>
                             ) : (
-                              movimentacoes.map((mov) => (
-                                <tr key={mov.id} className="hover:bg-zinc-900/30 transition-colors">
-                                  <td className="px-4 md:px-6 py-4 text-zinc-500 font-semibold tracking-wide font-mono">
-                                    {new Date(mov.created_at).toLocaleDateString('pt-BR')}
-                                  </td>
-                                  <td className="px-4 md:px-6 py-4 font-bold text-zinc-400 tracking-wide">{mov.motivo}</td>
-                                  <td className="px-4 md:px-6 py-4 text-zinc-500 font-semibold hidden md:table-cell">
-                                    {mov.profissional || '—'}
-                                  </td>
-                                  <td className={`px-4 md:px-6 py-4 text-right font-bold font-mono ${mov.tipo === 'entrada' ? 'text-zinc-200' : 'text-rose-400'}`}>
-                                    {mov.tipo === 'entrada' ? '' : '- '}
-                                    {Number(mov.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                  </td>
-                                </tr>
-                              ))
+                              movimentacoes.map((mov) => {
+                                const isPendente = (mov.motivo || '').toLowerCase().includes('[consumo fiado]')
+                                return (
+                                  <tr key={mov.id} className="hover:bg-zinc-900/30 transition-colors">
+                                    <td className="px-4 md:px-6 py-4 text-zinc-500 font-semibold tracking-wide font-mono">
+                                      {new Date(mov.created_at).toLocaleDateString('pt-BR')}
+                                    </td>
+                                    <td className="px-4 md:px-6 py-4 font-bold tracking-wide">
+                                      <span className={isPendente ? 'text-orange-400' : 'text-zinc-400'}>
+                                        {mov.motivo}
+                                      </span>
+                                      {isPendente && (
+                                        <span className="ml-2 text-[9px] bg-orange-400/10 text-orange-400 border border-orange-400/20 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-black">
+                                          pendente
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 md:px-6 py-4 text-zinc-500 font-semibold hidden md:table-cell">
+                                      {mov.profissional || '—'}
+                                    </td>
+                                    <td className={`px-4 md:px-6 py-4 text-right font-bold font-mono ${
+                                      mov.tipo !== 'entrada' ? 'text-rose-400'
+                                      : isPendente ? 'text-orange-400'
+                                      : 'text-zinc-200'
+                                    }`}>
+                                      {mov.tipo === 'entrada' ? '' : '- '}
+                                      {Number(mov.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </td>
+                                  </tr>
+                                )
+                              })
                             )}
                           </tbody>
                         </table>
