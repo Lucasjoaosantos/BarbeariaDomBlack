@@ -18,6 +18,7 @@ interface Movimentacao {
   motivo: string
   profissional?: string
   forma_pagamento?: string
+  proprietario?: string
 }
 
 function detectarFormaPagamento(mov: Movimentacao): string {
@@ -60,6 +61,8 @@ export default function CaixaRelatoriosPage() {
 
   const verTudo = usuario?.permissoes.verTudo ?? false
   const profissionalAtual = usuario?.profissional ?? ''
+  // proprietarioCaixa é o identificador do caixa do usuário logado (ex: 'gabriel', 'eduardo', 'caixa')
+  const proprietarioCaixa = usuario?.proprietarioCaixa ?? 'caixa'
 
   const carregarRelatorios = useCallback(async () => {
     setLoading(true)
@@ -77,24 +80,32 @@ export default function CaixaRelatoriosPage() {
         dataInicio = new Date(agora.getFullYear(), 0, 1)
       }
 
+      // ── CORREÇÃO PRINCIPAL ────────────────────────────────────────────────
+      // Antes: filtrava por `profissional` (campo de texto, inconsistente)
+      // Agora: filtra por `proprietario` (campo dedicado, gravado no insert)
+      // Admin/Caixa (verTudo=true) buscam tudo sem filtro
+      // Gabriel/Eduardo buscam apenas o próprio proprietario
       let query = supabase
         .from('movimentacoes_caixa')
-        .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento')
+        .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento, proprietario')
         .gte('created_at', dataInicio.toISOString())
         .order('created_at', { ascending: false })
 
       if (!verTudo) {
-        query = query.eq('profissional', profissionalAtual)
+        // Filtra pelo proprietario do caixa do usuário logado
+        query = query.eq('proprietario', proprietarioCaixa)
       }
 
       const { data: movs, error: errMovs } = await query
       if (errMovs) throw errMovs
 
-      const { data: fichaRows, error: errFicha } = await supabase
+      // Ficha: barbeiros só veem a ficha dos clientes do próprio caixa
+      let fichaQuery = supabase
         .from('historico_ficha')
         .select('valor')
         .gte('created_at', dataInicio.toISOString())
 
+      const { data: fichaRows, error: errFicha } = await fichaQuery
       if (errFicha) throw errFicha
 
       const saldoLiquidoFicha = (fichaRows || []).reduce(
@@ -117,48 +128,32 @@ export default function CaixaRelatoriosPage() {
 
       for (const m of listaMovs) {
         const valor = Number(m.valor) || 0
+        const prop = (m.proprietario || 'caixa').toLowerCase()
 
         if (m.tipo === 'entrada') {
           entradas += valor
+          totalGlobal += valor
 
           const forma = detectarFormaPagamento(m)
-          const motivo = (m.motivo || '').toLowerCase()
-
-          if (motivo.includes('[acerto via caixa]') || motivo.includes('[pagamento ficha]')) {
-            totalGlobal += valor
-            if (forma === 'pix')           pix      += valor
-            else if (forma === 'dinheiro') dinheiro += valor
-            else if (forma === 'cartao')   cartao   += valor
-            if (verTudo) listaFiltrada.push(m)
-            continue
-          }
-
           if (forma === 'pix')           pix      += valor
           else if (forma === 'dinheiro') dinheiro += valor
           else if (forma === 'cartao')   cartao   += valor
 
-          const profLower = (m.profissional || '').toLowerCase()
+          // Acumula por proprietário para o card de barbeiros
+          if (prop === 'gabriel')      totalGabriel += valor
+          else if (prop === 'eduardo') totalEduardo += valor
+          else                         totalGeral   += valor
 
-          if (profLower === 'gabriel') {
-            totalGabriel += valor
-            if (verTudo || profissionalAtual.toLowerCase() === 'gabriel')
-              listaFiltrada.push(m)
-          } else if (profLower === 'eduardo') {
-            totalEduardo += valor
-            if (verTudo || profissionalAtual.toLowerCase() === 'eduardo')
-              listaFiltrada.push(m)
-          } else {
-            totalGeral += valor
-            if (verTudo) listaFiltrada.push(m)
-          }
+          listaFiltrada.push(m)
 
-          totalGlobal += valor
         } else {
+          // saída (sangria)
           saidas += valor
-          if (verTudo) listaFiltrada.push(m)
+          listaFiltrada.push(m)
         }
       }
 
+      // Gráfico: evolução diária
       const porDia: Record<string, number> = {}
       for (const mov of listaMovs) {
         if (mov.tipo !== 'entrada') continue
@@ -184,13 +179,12 @@ export default function CaixaRelatoriosPage() {
     } finally {
       setLoading(false)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo, usuario])
 
   useEffect(() => {
     setAbasAbertas(new Set(abasVisiveis))
     carregarRelatorios()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo, usuario])
 
   function toggleAba(id: TabId) {
@@ -219,7 +213,12 @@ export default function CaixaRelatoriosPage() {
         {/* PERFIL ATIVO */}
         <div className="bg-zinc-900/10 backdrop-blur-md border border-zinc-800/80 p-3.5 rounded-2xl flex items-center gap-2 text-[10px] font-bold tracking-wider uppercase text-zinc-500 shadow-xl">
           <Shield className="w-3.5 h-3.5 text-zinc-400" />
-          <span>Visualizando como: <strong className="text-zinc-200">{profissionalAtual}</strong></span>
+          <span>
+            Visualizando como: <strong className="text-zinc-200">{profissionalAtual}</strong>
+            {!verTudo && (
+              <span className="ml-2 text-zinc-600">· apenas seus lançamentos</span>
+            )}
+          </span>
         </div>
 
         {/* CABEÇALHO */}
@@ -227,7 +226,10 @@ export default function CaixaRelatoriosPage() {
           <div>
             <h1 className="text-2xl md:text-3xl font-black tracking-widest uppercase">Relatórios</h1>
             <p className="text-zinc-500 text-xs tracking-wider uppercase mt-1.5 font-semibold">
-              Produção e faturamento individualizado por profissional
+              {verTudo
+                ? 'Produção e faturamento de todos os profissionais'
+                : `Produção e faturamento de ${profissionalAtual}`
+              }
             </p>
           </div>
 
@@ -360,7 +362,7 @@ export default function CaixaRelatoriosPage() {
                       <div className="p-4 md:p-5 pt-0">
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
 
-                          {(verTudo || profissionalAtual.toLowerCase() === 'gabriel') && (
+                          {(verTudo || proprietarioCaixa === 'gabriel') && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
                                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Barber Gabriel</span>
@@ -371,7 +373,7 @@ export default function CaixaRelatoriosPage() {
                             </div>
                           )}
 
-                          {(verTudo || profissionalAtual.toLowerCase() === 'eduardo') && (
+                          {(verTudo || proprietarioCaixa === 'eduardo') && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
                                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Barber Eduardo</span>
