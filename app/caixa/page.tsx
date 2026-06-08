@@ -389,6 +389,17 @@ export default function CaixaPDVPage() {
           })
           if (error) throw error
         }
+
+        // ✅ CORREÇÃO: baixar estoque dos produtos mesmo quando pagamento é ficha
+        for (const itemCarrinho of carrinho) {
+          if (itemCarrinho.item.tipo === 'produto') {
+            const { error } = await supabase.rpc('registrar_venda_segura', {
+              p_produto_id: itemCarrinho.item.id, p_quantidade: itemCarrinho.quantidade
+            })
+            if (error) throw error
+          }
+        }
+
         alert('✅ Lançamento na ficha realizado!')
 
       } else {
