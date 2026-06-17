@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Trash2, Plus, Receipt } from 'lucide-react'
+import { SeletorCliente } from '@/components/caixa/SeletorCliente'
+
 
 interface Cliente {
   id: number
@@ -78,7 +80,7 @@ export default function CaixaPDVPage() {
   const [trocoInicial, setTrocoInicial] = useState('')
   const [resumoFechamento, setResumoFechamento] = useState<ResumoFechamento | null>(null)
 
-  const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
+const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [saldoFichaAberto, setSaldoFichaAberto] = useState<number>(0)
   const [valorAbatimentoInput, setValorAbatimentoInput] = useState('')
 
