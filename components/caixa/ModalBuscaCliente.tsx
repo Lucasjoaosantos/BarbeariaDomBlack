@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase'
 import { Search, X, User, Phone } from 'lucide-react'
 
 interface Cliente {
@@ -9,7 +9,7 @@ interface Cliente {
   nome: string
   telefone: string | null
   permite_fiado: boolean
-  saldo_ficha: number
+  ativo: boolean
 }
 
 interface ModalBuscaClienteProps {
@@ -29,7 +29,6 @@ export function ModalBuscaCliente({
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [carregando, setCarregando] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const supabase = createClient()
 
   useEffect(() => {
     if (aberto) {
@@ -41,17 +40,17 @@ export function ModalBuscaCliente({
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      carregarClientes(busca)
+      if (aberto) carregarClientes(busca)
     }, 300)
     return () => clearTimeout(timeout)
-  }, [busca])
+  }, [busca, aberto])
 
   async function carregarClientes(termo: string) {
     setCarregando(true)
     try {
       let query = supabase
         .from('clientes')
-        .select('id, nome, telefone, permite_fiado, saldo_ficha')
+        .select('id, nome, telefone, permite_fiado, ativo')
         .eq('ativo', true)
         .order('nome')
         .limit(50)
@@ -77,15 +76,13 @@ export function ModalBuscaCliente({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div className="w-full max-w-md mx-4 bg-zinc-900 border border-zinc-700/60 rounded-2xl shadow-2xl overflow-hidden">
+
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
           <h2 className="text-sm font-bold tracking-wider uppercase text-white">
             Selecionar Cliente
           </h2>
-          <button
-            onClick={onFechar}
-            className="text-zinc-500 hover:text-white transition-colors"
-          >
+          <button onClick={onFechar} className="text-zinc-500 hover:text-white transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -93,10 +90,7 @@ export function ModalBuscaCliente({
         {/* Barra de busca */}
         <div className="px-4 pt-4 pb-2">
           <div className="relative">
-            <Search
-              size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-            />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
             <input
               ref={inputRef}
               type="text"
@@ -116,9 +110,10 @@ export function ModalBuscaCliente({
           </div>
         </div>
 
-        {/* Lista de clientes */}
+        {/* Lista */}
         <div className="max-h-72 overflow-y-auto px-4 pb-4">
-          {/* Opção Cliente Final (Avulso) */}
+
+          {/* Opção Avulso */}
           <button
             onClick={() => handleSelecionar(null)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left transition-colors ${
@@ -142,9 +137,7 @@ export function ModalBuscaCliente({
           <div className="border-t border-zinc-800 my-2" />
 
           {carregando ? (
-            <div className="text-center py-6 text-zinc-500 text-sm">
-              Carregando...
-            </div>
+            <div className="text-center py-6 text-zinc-500 text-sm">Carregando...</div>
           ) : clientes.length === 0 ? (
             <div className="text-center py-6 text-zinc-500 text-sm">
               {busca ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado.'}
@@ -172,6 +165,9 @@ export function ModalBuscaCliente({
                       <Phone size={9} />
                       {cliente.telefone}
                     </p>
+                  )}
+                  {cliente.permite_fiado && (
+                    <p className="text-[10px] text-amber-500 font-semibold">• Possui Ficha</p>
                   )}
                 </div>
                 {clienteSelecionado?.id === cliente.id && (
