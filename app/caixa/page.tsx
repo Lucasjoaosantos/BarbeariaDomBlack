@@ -9,15 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Trash2, Plus, Receipt } from 'lucide-react'
+import { Trash2, Plus, Receipt, RotateCcw, AlertTriangle } from 'lucide-react'
 import { SeletorCliente } from '@/components/caixa/SeletorCliente'
-
 
 interface Cliente {
   id: number
   nome: string
   permite_fiado: boolean
   ativo: boolean
+  telefone?: string | null
 }
 
 interface Caixa {
@@ -57,13 +57,23 @@ interface ItemCarrinho {
   valorTotal: number
 }
 
+interface Movimentacao {
+  id: number
+  tipo: string
+  valor: string | number
+  motivo: string | null
+  forma_pagamento: string | null
+  profissional: string | null
+  created_at: string
+  estornada: boolean
+}
+
 // Cache em memória para dados estáticos
 let _cacheProdutosServicos: ItemVenda[] | null = null
 let _cacheClientes: Cliente[] | null = null
 
 export default function CaixaPDVPage() {
 
-  // ── Guard: só quem tem permissão 'caixa' acessa ──────────────────────────────
   const { usuario, negado } = useGuard('caixa')
 
   const [clientes, setClientes] = useState<Cliente[]>([])
@@ -80,7 +90,8 @@ export default function CaixaPDVPage() {
   const [trocoInicial, setTrocoInicial] = useState('')
   const [resumoFechamento, setResumoFechamento] = useState<ResumoFechamento | null>(null)
 
-const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
+  // ── CLIENTE: agora usa objeto Cliente direto (não apenas o id) ──────────────
+  const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [saldoFichaAberto, setSaldoFichaAberto] = useState<number>(0)
   const [valorAbatimentoInput, setValorAbatimentoInput] = useState('')
 
@@ -91,38 +102,56 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
   const [isProcessando, setIsProcessando] = useState(false)
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
 
+  // ── ESTORNO ────────────────────────────────────────────────────────────────
+  const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([])
+  const [modalEstorno, setModalEstorno] = useState<Movimentacao | null>(null)
+  const [processandoEstorno, setProcessandoEstorno] = useState(false)
+  const [mostrarHistorico, setMostrarHistorico] = useState(false)
+
   const inicializadoRef = useRef(false)
 
   useEffect(() => {
-    // Aguarda o usuário estar disponível antes de inicializar
     if (!usuario || inicializadoRef.current) return
     inicializadoRef.current = true
     inicializarCaixa()
   }, [usuario])
 
-  // ── O profissional é sempre o do usuário logado — sem seleção manual ──────────
+  // Quando o cliente muda, busca saldo da ficha se aplicável
+  useEffect(() => {
+    if (clienteSelecionado?.permite_fiado) {
+      buscarSaldoFichaCliente(clienteSelecionado.id)
+    } else {
+      setSaldoFichaAberto(0)
+      setValorAbatimentoInput('')
+    }
+  }, [clienteSelecionado])
+
   const profissionalLogado = usuario?.profissional ?? 'Caixa'
   const proprietarioCaixa = usuario?.proprietarioCaixa ?? 'caixa'
 
   async function inicializarCaixa(forcarEstaticos = false) {
     setLoading(true)
     try {
-      // Busca apenas o caixa DESTE usuário (filtro por proprietario)
       const { data: caixas, error: errCaixa } = await supabase
         .from('controle_caixa')
         .select('id, status, valor_inicial, valor_final, closed_at, proprietario')
         .eq('status', 'aberto')
-        .eq('proprietario', proprietarioCaixa)   // ← isolamento por usuário
+        .eq('proprietario', proprietarioCaixa)
         .order('id', { ascending: false })
         .limit(1)
 
       if (errCaixa) throw errCaixa
-      setCaixaAtivo(caixas && caixas.length > 0 ? caixas[0] : null)
+      const caixaEncontrado = caixas && caixas.length > 0 ? caixas[0] : null
+      setCaixaAtivo(caixaEncontrado)
+
+      if (caixaEncontrado) {
+        carregarMovimentacoes(caixaEncontrado.id)
+      }
 
       if (!_cacheClientes || forcarEstaticos) {
         const { data: dataClientes } = await supabase
           .from('clientes')
-          .select('id, nome, permite_fiado, ativo')
+          .select('id, nome, permite_fiado, ativo, telefone')
           .eq('ativo', true)
           .order('nome', { ascending: true })
         _cacheClientes = (dataClientes as Cliente[]) || []
@@ -136,11 +165,7 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         ])
 
         const produtosFormatados: ItemVenda[] = (resProdutos.data || []).map(p => ({
-          id: p.id,
-          nome: p.nome, 
-          preco_venda: p.preco_venda,
-          tipo: 'produto', 
-          estoque: p.estoque
+          id: p.id, nome: p.nome, preco_venda: p.preco_venda, tipo: 'produto', estoque: p.estoque
         }))
         const servicosFormatados: ItemVenda[] = (resServicos.data || []).map(s => ({
           id: s.id, nome: s.nome, preco: s.preco, tipo: 'servico'
@@ -151,10 +176,21 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
       setItensDisponiveis(_cacheProdutosServicos)
 
     } catch (err) {
-      console.error("Erro na inicialização do PDV:", err)
+      console.error('Erro na inicialização do PDV:', err)
     } finally {
       setLoading(false)
     }
+  }
+
+  // ── Carrega movimentações do caixa para o histórico / estorno ─────────────
+  async function carregarMovimentacoes(caixaId: number) {
+    const { data } = await supabase
+      .from('movimentacoes_caixa')
+      .select('id, tipo, valor, motivo, forma_pagamento, profissional, created_at, estornada')
+      .eq('caixa_id', caixaId)
+      .order('created_at', { ascending: false })
+      .limit(50)
+    setMovimentacoes(data ?? [])
   }
 
   function recarregarAposFinalizar(temProduto: boolean) {
@@ -169,7 +205,11 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         .eq('proprietario', proprietarioCaixa)
         .order('id', { ascending: false })
         .limit(1)
-        .then(({ data }) => setCaixaAtivo(data && data.length > 0 ? data[0] : null))
+        .then(({ data }) => {
+          const c = data && data.length > 0 ? data[0] : null
+          setCaixaAtivo(c)
+          if (c) carregarMovimentacoes(c.id)
+        })
     }
   }
 
@@ -195,16 +235,11 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
     }
   }
 
-  async function handleMudarCliente(idSelecionado: string) {
-    if (!idSelecionado) {
-      setClienteSelecionado(null); setSaldoFichaAberto(0); setValorAbatimentoInput(''); return
-    }
-    const cliente = clientes.find(c => c.id === Number(idSelecionado))
-    if (cliente) {
-      setClienteSelecionado(cliente)
-      if (cliente.permite_fiado) await buscarSaldoFichaCliente(cliente.id)
-      else { setSaldoFichaAberto(0); setValorAbatimentoInput('') }
-    }
+  // ── Handler para quando SeletorCliente escolhe um cliente ─────────────────
+  function handleSelecionarCliente(cliente: Cliente | null) {
+    setClienteSelecionado(cliente)
+    // Remove item de ficha do carrinho se trocar de cliente
+    setCarrinho(prev => prev.filter(c => c.item.tipo !== 'recebimento_ficha'))
   }
 
   function handleMudarItem(nomeItem: string) {
@@ -257,7 +292,7 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
     setCarrinho([...carrinho, {
       item: itemFato,
       quantidade: quantidadeInput,
-      profissional: profissionalLogado,  // ← sempre o profissional do login
+      profissional: profissionalLogado,
       valorUnitario,
       valorTotal: valorUnitario * quantidadeInput
     }])
@@ -288,7 +323,9 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         .select().single()
 
       if (error) throw error
-      setCaixaAtivo(data); setTrocoInicial(''); setModalAbrir(false)
+      setCaixaAtivo(data)
+      carregarMovimentacoes(data.id)
+      setTrocoInicial(''); setModalAbrir(false)
       alert('Caixa aberto com sucesso!')
     } catch (err: any) { console.error(err); alert(err.message) }
   }
@@ -302,13 +339,14 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         .eq('caixa_id', caixaAtivo.id)
 
       if (error) throw error
-      const movimentacoes = movs || []
+      const movimentacoesData = movs || []
       let dinheiro = 0, pix = 0, cartao = 0, sangria = 0
 
-      movimentacoes.forEach(m => {
+      movimentacoesData.forEach(m => {
         const valorNum = Number(m.valor) || 0
         const motivoLower = (m.motivo || '').toLowerCase()
         if (motivoLower.includes('[sangria]') || m.tipo === 'saida') { sangria += valorNum; return }
+        if (m.tipo === 'estorno') { return } // estornos já estão descontados
         const forma = (m.forma_pagamento || '').toLowerCase()
         if (forma === 'dinheiro' || motivoLower.includes('dinheiro'))   dinheiro += valorNum
         else if (forma === 'pix' || motivoLower.includes('pix'))        pix      += valorNum
@@ -319,7 +357,7 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
       const caixaEmMaos = (caixaAtivo.valor_inicial || 0) + dinheiro - sangria
       setResumoFechamento({
         inicial: caixaAtivo.valor_inicial || 0, dinheiro, pix, cartao, sangria,
-        totalAtendimentos: movimentacoes.length, faturamentoGeral, caixaEmMaos
+        totalAtendimentos: movimentacoesData.length, faturamentoGeral, caixaEmMaos
       })
       setValorContado(''); setModalFechar(true)
     } catch (err) { console.error(err); alert('Erro ao processar dados de fechamento.') }
@@ -336,7 +374,9 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         proprietario: proprietarioCaixa
       })
       if (error) throw error
-      alert('Sangria realizada!'); setValorSangria(''); setMotivoSangria(''); setModalSangria(false)
+      alert('Sangria realizada!')
+      setValorSangria(''); setMotivoSangria(''); setModalSangria(false)
+      carregarMovimentacoes(caixaAtivo.id)
     } catch (err: any) { alert(`Erro na sangria: ${err.message}`) }
   }
 
@@ -392,7 +432,6 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
           if (error) throw error
         }
 
-        // ✅ CORREÇÃO: baixar estoque dos produtos mesmo quando pagamento é ficha
         for (const itemCarrinho of carrinho) {
           if (itemCarrinho.item.tipo === 'produto') {
             const { error } = await supabase.rpc('registrar_venda_segura', {
@@ -446,8 +485,11 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         alert('✅ Operação finalizada com sucesso!')
       }
 
-      setCarrinho([]); setClienteSelecionado(null); setSaldoFichaAberto(0)
-      setValorAbatimentoInput(''); setFormaPagamento('pix')
+      setCarrinho([])
+      setClienteSelecionado(null)
+      setSaldoFichaAberto(0)
+      setValorAbatimentoInput('')
+      setFormaPagamento('pix')
       recarregarAposFinalizar(temProduto)
 
     } catch (err: any) {
@@ -473,10 +515,71 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
       if (error) throw error
       alert('✅ Caixa encerrado!')
       setModalFechar(false); setCaixaAtivo(null); setResumoFechamento(null); setValorContado('')
+      setMovimentacoes([])
     } catch (err: any) { console.error(err); alert(`Erro ao salvar: ${err.message}`) }
   }
 
-  // Guard: não renderiza nada enquanto redireciona
+  // ── ESTORNO ────────────────────────────────────────────────────────────────
+  async function handleConfirmarEstorno() {
+    if (!modalEstorno || !caixaAtivo) return
+    setProcessandoEstorno(true)
+    try {
+      // 1. Marcar original como estornada
+      const { error: e1 } = await supabase
+        .from('movimentacoes_caixa')
+        .update({ estornada: true })
+        .eq('id', modalEstorno.id)
+      if (e1) throw e1
+
+      // 2. Criar movimentação de estorno
+      const { error: e2 } = await supabase.from('movimentacoes_caixa').insert({
+        caixa_id: caixaAtivo.id,
+        tipo: 'estorno',
+        valor: modalEstorno.valor,
+        motivo: `[ESTORNO] Ref. MOV#${modalEstorno.id} — ${modalEstorno.motivo ?? ''}`,
+        profissional: modalEstorno.profissional,
+        forma_pagamento: modalEstorno.forma_pagamento,
+        proprietario: proprietarioCaixa,
+      })
+      if (e2) throw e2
+
+      // 3. Se for PRODUTO, devolver ao estoque via RPC
+      const motivo = modalEstorno.motivo ?? ''
+      if (motivo.includes('[PRODUTO]')) {
+        // Tenta extrair produto do motivo: "1x Nome Produto [PRODUTO]"
+        const regex = /(\d+)x ([^[]+)\[PRODUTO\]/gi
+        let match
+        while ((match = regex.exec(motivo)) !== null) {
+          const quantidade = parseInt(match[1])
+          const nomeProd = match[2].trim()
+          // Busca o produto pelo nome para pegar o id
+          const { data: prod } = await supabase
+            .from('produtos')
+            .select('id, estoque')
+            .ilike('nome', nomeProd)
+            .maybeSingle()
+          if (prod) {
+            await supabase
+              .from('produtos')
+              .update({ estoque: prod.estoque + quantidade })
+              .eq('id', prod.id)
+          }
+        }
+      }
+
+      alert('✅ Estorno realizado com sucesso!')
+      setModalEstorno(null)
+      carregarMovimentacoes(caixaAtivo.id)
+    } catch (err: any) {
+      console.error(err)
+      alert(`Erro ao estornar: ${err.message}`)
+    } finally {
+      setProcessandoEstorno(false)
+    }
+  }
+
+  const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
   if (negado) return null
 
   if (loading) {
@@ -496,7 +599,6 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 md:mb-8 border-b border-zinc-800 pb-5 gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-black tracking-widest uppercase">Frente de Caixa</h1>
-            {/* Mostra de quem é o caixa */}
             <p className="text-zinc-600 text-[10px] tracking-widest uppercase mt-0.5 font-bold">
               Operador: <span className="text-zinc-400">{profissionalLogado}</span>
             </p>
@@ -528,25 +630,15 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
 
         <div className="space-y-5 bg-zinc-900/30 p-5 md:p-8 rounded-2xl border border-zinc-800/80 backdrop-blur-md shadow-xl">
 
-          {/* SEÇÃO 1: CLIENTE */}
+          {/* SEÇÃO 1: CLIENTE — agora com barra de pesquisa */}
           <div className="space-y-3">
-            <Label htmlFor="cliente" className="text-zinc-500 text-[10px] font-bold tracking-wider uppercase">
+            <Label className="text-zinc-500 text-[10px] font-bold tracking-wider uppercase">
               1. Identificar Cliente
             </Label>
-            <select
-              id="cliente"
-              value={clienteSelecionado ? clienteSelecionado.id : ''}
-              onChange={(e) => handleMudarCliente(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3.5 py-3 text-xs font-semibold text-zinc-300 focus:outline-none focus:border-zinc-700 transition-colors"
-              disabled={!caixaAtivo}
-            >
-              <option value="">Cliente Final (Avulso)</option>
-              {clientes.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.nome} {c.permite_fiado ? '• (Possui Ficha)' : ''}
-                </option>
-              ))}
-            </select>
+            <SeletorCliente
+              clienteSelecionado={clienteSelecionado}
+              onSelecionar={handleSelecionarCliente}
+            />
 
             {clienteSelecionado?.permite_fiado && saldoFichaAberto > 0 && (
               <div className="p-4 bg-zinc-950 border border-amber-500/20 rounded-xl text-xs space-y-3">
@@ -555,7 +647,7 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
                     <Receipt size={14} className="text-amber-400" />
                     Ficha em Aberto:
                     <span className="text-amber-400 font-mono">
-                      {saldoFichaAberto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {fmt(saldoFichaAberto)}
                     </span>
                   </p>
                 </div>
@@ -576,7 +668,6 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
           <div className="p-4 md:p-5 bg-zinc-950/40 rounded-xl border border-zinc-800/60 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">2. Adicionar Itens ao Pedido</h2>
-              {/* Profissional fixo — sem select, apenas exibe */}
               <span className="text-[10px] font-bold tracking-widest uppercase text-zinc-600">
                 Profissional: <span className="text-zinc-400">{profissionalLogado}</span>
               </span>
@@ -690,6 +781,65 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
               {isProcessando ? 'Processando...' : 'Concluir e Lançar no Caixa'}
             </button>
           </form>
+
+          {/* SEÇÃO 4: HISTÓRICO COM BOTÃO DE ESTORNO */}
+          {caixaAtivo && movimentacoes.length > 0 && (
+            <div className="pt-4 border-t border-zinc-800/60">
+              <button
+                type="button"
+                onClick={() => setMostrarHistorico(!mostrarHistorico)}
+                className="w-full flex items-center justify-between text-[10px] font-bold tracking-widest uppercase text-zinc-500 hover:text-zinc-300 transition-colors mb-3"
+              >
+                <span>Lançamentos do Turno ({movimentacoes.length})</span>
+                <span>{mostrarHistorico ? '▲ Ocultar' : '▼ Ver'}</span>
+              </button>
+
+              {mostrarHistorico && (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                  {movimentacoes.map((mov) => {
+                    const podeEstornar = mov.tipo === 'entrada' && !mov.estornada
+                    const hora = new Date(mov.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                    return (
+                      <div key={mov.id}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+                          mov.estornada ? 'opacity-40 bg-zinc-800/20' : 'bg-zinc-800/40 hover:bg-zinc-800/60'
+                        }`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs leading-snug truncate ${mov.estornada ? 'line-through text-zinc-500' : 'text-zinc-300'}`}>
+                            {mov.motivo ?? '—'}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-zinc-600">{hora}</span>
+                            {mov.forma_pagamento && <span className="text-[10px] text-zinc-600 uppercase">· {mov.forma_pagamento}</span>}
+                            {mov.estornada && <span className="text-[10px] text-amber-500/80 font-medium">· ESTORNADO</span>}
+                          </div>
+                        </div>
+                        <span className={`text-sm font-bold tabular-nums flex-shrink-0 ${
+                          mov.estornada ? 'text-zinc-600' :
+                          mov.tipo === 'entrada' ? 'text-green-400' :
+                          mov.tipo === 'estorno' ? 'text-amber-400' : 'text-red-400'
+                        }`}>
+                          {mov.tipo === 'entrada' ? '+' : '-'}
+                          {fmt(Number(mov.valor))}
+                        </span>
+                        {podeEstornar && (
+                          <button
+                            type="button"
+                            onClick={() => setModalEstorno(mov)}
+                            title="Estornar lançamento"
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-zinc-600 hover:text-amber-400 hover:bg-amber-400/10 transition-colors flex-shrink-0"
+                          >
+                            <RotateCcw size={13} />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -755,37 +905,31 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
             <div className="mt-4 space-y-4">
               <div className="space-y-2 text-[11px] font-semibold tracking-wider uppercase">
                 {[
-                  ['(+) Troco Inicial', resumoFechamento.inicial, 'zinc'],
-                  ['Faturamento Dinheiro', resumoFechamento.dinheiro, 'zinc'],
-                  ['Faturamento Pix', resumoFechamento.pix, 'zinc'],
-                  ['Faturamento Cartão', resumoFechamento.cartao, 'zinc'],
+                  ['(+) Troco Inicial', resumoFechamento.inicial],
+                  ['Faturamento Dinheiro', resumoFechamento.dinheiro],
+                  ['Faturamento Pix', resumoFechamento.pix],
+                  ['Faturamento Cartão', resumoFechamento.cartao],
                 ].map(([label, valor]) => (
                   <div key={label as string} className="flex justify-between text-zinc-500">
                     <span>{label as string}</span>
-                    <span className="text-zinc-300 font-bold font-mono">
-                      {(valor as number).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </span>
+                    <span className="text-zinc-300 font-bold font-mono">{fmt(valor as number)}</span>
                   </div>
                 ))}
                 <div className="flex justify-between text-red-400">
                   <span>(-) Total Sangrias</span>
-                  <span className="font-bold font-mono">
-                    {resumoFechamento.sangria.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
+                  <span className="font-bold font-mono">{fmt(resumoFechamento.sangria)}</span>
                 </div>
                 <div className="h-px bg-zinc-800 my-1" />
                 <div className="flex justify-between text-zinc-200 font-bold">
                   <span>Faturamento Geral</span>
-                  <span className="font-mono">
-                    {resumoFechamento.faturamentoGeral.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
+                  <span className="font-mono">{fmt(resumoFechamento.faturamentoGeral)}</span>
                 </div>
                 <div className={`flex justify-between px-3.5 py-3 rounded-xl border font-black text-[12px] ${
                   resumoFechamento.caixaEmMaos < 0 ? 'bg-red-950/40 border-red-800/50' : 'bg-zinc-950 border-zinc-800/80'
                 }`}>
                   <span className="text-white">💵 Dinheiro Físico em Caixa</span>
                   <span className={`font-mono ${resumoFechamento.caixaEmMaos < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                    {resumoFechamento.caixaEmMaos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    {fmt(resumoFechamento.caixaEmMaos)}
                   </span>
                 </div>
               </div>
@@ -806,7 +950,7 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
                       Number(valorContado) > resumoFechamento.caixaEmMaos ? 'text-emerald-400'
                       : Number(valorContado) < resumoFechamento.caixaEmMaos ? 'text-red-400' : 'text-zinc-200'
                     }`}>
-                      {(Number(valorContado) - resumoFechamento.caixaEmMaos).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {fmt(Number(valorContado) - resumoFechamento.caixaEmMaos)}
                     </span>
                   </div>
                 )}
@@ -820,6 +964,71 @@ const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(nul
           )}
         </DialogContent>
       </Dialog>
+
+      {/* MODAL ESTORNO */}
+      <Dialog open={!!modalEstorno} onOpenChange={(open) => { if (!open) setModalEstorno(null) }}>
+        <DialogContent className="border-zinc-800/80 bg-zinc-900/95 backdrop-blur-md text-white rounded-2xl max-w-sm p-6 shadow-2xl">
+          <DialogHeader className="border-b border-zinc-800/60 pb-4">
+            <DialogTitle className="text-sm font-black tracking-widest uppercase flex items-center gap-2">
+              <RotateCcw size={14} className="text-amber-400" />
+              Estornar Lançamento
+            </DialogTitle>
+          </DialogHeader>
+          {modalEstorno && (
+            <div className="mt-4 space-y-4">
+              {/* Aviso */}
+              <div className="flex gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+                <AlertTriangle size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-300 leading-relaxed">
+                  {modalEstorno.motivo?.includes('[PRODUTO]')
+                    ? 'O valor será estornado e os produtos voltarão ao estoque.'
+                    : 'O valor será estornado do caixa. Nenhum estoque será alterado.'}
+                </p>
+              </div>
+
+              {/* Detalhes */}
+              <div className="bg-zinc-800/60 rounded-xl px-4 py-3 space-y-2">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Detalhes</p>
+                <div className="flex justify-between">
+                  <span className="text-xs text-zinc-400">Valor</span>
+                  <span className="text-sm font-bold text-white">{fmt(Number(modalEstorno.valor))}</span>
+                </div>
+                {modalEstorno.forma_pagamento && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-zinc-400">Pagamento</span>
+                    <span className="text-xs text-zinc-300 uppercase">{modalEstorno.forma_pagamento}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-xs text-zinc-400">Tipo</span>
+                  <span className={`text-xs font-semibold ${modalEstorno.motivo?.includes('[PRODUTO]') ? 'text-blue-400' : 'text-purple-400'}`}>
+                    {modalEstorno.motivo?.includes('[PRODUTO]') ? 'Produto (devolve estoque)' : 'Serviço (só valor)'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setModalEstorno(null)}
+                  disabled={processandoEstorno}
+                  className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-400 text-sm font-medium hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmarEstorno}
+                  disabled={processandoEstorno}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  <RotateCcw size={14} />
+                  {processandoEstorno ? 'Processando...' : 'Confirmar'}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }
