@@ -19,6 +19,7 @@ interface Movimentacao {
   profissional?: string
   forma_pagamento?: string
   proprietario?: string
+  estornada?: boolean
 }
 
 function detectarFormaPagamento(mov: Movimentacao): string {
@@ -51,6 +52,7 @@ export default function CaixaRelatoriosPage() {
   const [faturamentoTotalGlobal, setFaturamentoTotalGlobal] = useState(0)
   const [totalEntradas,          setTotalEntradas]          = useState(0)
   const [totalSaidas,            setTotalSaidas]            = useState(0)
+  const [totalEstornos,          setTotalEstornos]          = useState(0)
   const [lucroLiquido,           setLucroLiquido]           = useState(0)
   const [totalPix,               setTotalPix]               = useState(0)
   const [totalDinheiro,          setTotalDinheiro]          = useState(0)
@@ -66,22 +68,39 @@ export default function CaixaRelatoriosPage() {
   const carregarRelatorios = useCallback(async () => {
     setLoading(true)
     try {
-      const agora = new Date()
-      let dataInicio = new Date()
+      // Calcula dataInicio sempre no fuso de Brasília (UTC-3)
+      // para não perder lançamentos feitos à noite que têm created_at UTC do dia seguinte
+      const OFFSET_BRASILIA = -3 * 60 // minutos
+      const agoraUTC = new Date()
+      // Cria "agora" ajustado para Brasília
+      const agoraBrasil = new Date(agoraUTC.getTime() + (OFFSET_BRASILIA - agoraUTC.getTimezoneOffset()) * 60000)
+
+      let dataInicio: Date
 
       if (periodo === 'hoje') {
-        dataInicio.setHours(0, 0, 0, 0)
+        // Meia-noite de Brasília em UTC
+        dataInicio = new Date(Date.UTC(
+          agoraBrasil.getFullYear(),
+          agoraBrasil.getMonth(),
+          agoraBrasil.getDate(),
+          3, 0, 0, 0  // 00:00 Brasília = 03:00 UTC
+        ))
       } else if (periodo === '7dias') {
-        dataInicio.setDate(agora.getDate() - 7)
+        dataInicio = new Date(agoraUTC.getTime() - 7 * 24 * 60 * 60 * 1000)
       } else if (periodo === 'mes') {
-        dataInicio = new Date(agora.getFullYear(), agora.getMonth(), 1)
-      } else if (periodo === 'ano') {
-        dataInicio = new Date(agora.getFullYear(), 0, 1)
+        dataInicio = new Date(Date.UTC(
+          agoraBrasil.getFullYear(),
+          agoraBrasil.getMonth(),
+          1,
+          3, 0, 0, 0
+        ))
+      } else {
+        dataInicio = new Date(Date.UTC(agoraBrasil.getFullYear(), 0, 1, 3, 0, 0, 0))
       }
 
       let query = supabase
         .from('movimentacoes_caixa')
-        .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento, proprietario')
+        .select('id, created_at, tipo, valor, motivo, profissional, forma_pagamento, proprietario, estornada')
         .gte('created_at', dataInicio.toISOString())
         .order('created_at', { ascending: false })
 
@@ -92,7 +111,6 @@ export default function CaixaRelatoriosPage() {
       const { data: movs, error: errMovs } = await query
       if (errMovs) throw errMovs
 
-      // Ficha pendente: soma dos débitos ainda não acertados no historico_ficha
       const { data: fichaRows, error: errFicha } = await supabase
         .from('historico_ficha')
         .select('valor')
@@ -112,6 +130,7 @@ export default function CaixaRelatoriosPage() {
       let totalGlobal  = 0
       let entradas     = 0
       let saidas       = 0
+      let estornos     = 0
       let pix          = 0
       let dinheiro     = 0
       let cartao       = 0
@@ -123,14 +142,23 @@ export default function CaixaRelatoriosPage() {
         const prop   = (m.proprietario || 'caixa').toLowerCase()
         const motivo = (m.motivo || '').toLowerCase()
 
+        // ── ESTORNO: descontar do total e mostrar na lista ─────────────────
+        if (m.tipo === 'estorno') {
+          estornos += valor
+          listaFiltrada.push(m)
+          continue
+        }
+
+        // ── ENTRADA ESTORNADA: ignorar completamente nos cálculos ──────────
+        if (m.tipo === 'entrada' && m.estornada === true) {
+          // Ainda aparece na lista (riscado), mas não entra nos totais
+          listaFiltrada.push(m)
+          continue
+        }
+
         if (m.tipo === 'entrada') {
           const isConsumoFiado = motivo.includes('[consumo fiado]')
-          const isAcerto       = motivo.includes('[acerto via caixa]')
 
-          // ── REGRA DE FATURAMENTO ─────────────────────────────────────────
-          // [CONSUMO FIADO]    → NÃO soma: dinheiro ainda não entrou, está pendente
-          // [ACERTO VIA CAIXA] → SOMA: é aqui que o dinheiro entrou de verdade
-          // Demais lançamentos → SOMA normalmente (venda à vista)
           if (!isConsumoFiado) {
             entradas    += valor
             totalGlobal += valor
@@ -139,7 +167,6 @@ export default function CaixaRelatoriosPage() {
             else if (prop === 'eduardo') totalEduardo += valor
             else                         totalGeral   += valor
 
-            // Formas de pagamento: só conta quando o dinheiro realmente entrou
             const forma = detectarFormaPagamento(m)
             if (forma === 'pix')           pix      += valor
             else if (forma === 'dinheiro') dinheiro += valor
@@ -149,30 +176,35 @@ export default function CaixaRelatoriosPage() {
           listaFiltrada.push(m)
 
         } else {
-          // Saída (sangria)
+          // Saída / sangria
           saidas += valor
           listaFiltrada.push(m)
         }
       }
 
-      // Gráfico: só lançamentos que realmente entraram (sem consumo fiado)
+      // Gráfico: só entradas não estornadas e não fiado
       const porDia: Record<string, number> = {}
       for (const mov of listaMovs) {
         if (mov.tipo !== 'entrada') continue
+        if (mov.estornada === true) continue
         if ((mov.motivo || '').toLowerCase().includes('[consumo fiado]')) continue
         const d = new Date(mov.created_at).toLocaleDateString('pt-BR')
         porDia[d] = (porDia[d] || 0) + Number(mov.valor || 0)
       }
 
+      // Desconta estornos do faturamento
+      const entradasLiquidas = entradas - estornos
+
       setDadosGrafico(Object.entries(porDia).map(([data, valor]) => ({ data, valor })))
       setFaturamentoGabriel(totalGabriel)
       setFaturamentoEduardo(totalEduardo)
       setFaturamentoGeral(totalGeral)
-      setFaturamentoTotalGlobal(totalGlobal)
+      setFaturamentoTotalGlobal(totalGlobal - estornos)
       setMovimentacoes(listaFiltrada)
-      setTotalEntradas(entradas)
+      setTotalEntradas(entradasLiquidas)
       setTotalSaidas(saidas)
-      setLucroLiquido(entradas - saidas)
+      setTotalEstornos(estornos)
+      setLucroLiquido(entradasLiquidas - saidas)
       setTotalPix(pix)
       setTotalDinheiro(dinheiro)
       setTotalCartao(cartao)
@@ -294,7 +326,7 @@ export default function CaixaRelatoriosPage() {
                               <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
                             </div>
                             <div className="text-xl md:text-2xl font-black text-emerald-400 font-mono tracking-tight">{brl(totalEntradas)}</div>
-                            <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Total efetivamente recebido</p>
+                            <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Líquido (descontando estornos)</p>
                           </div>
 
                           <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
@@ -327,6 +359,17 @@ export default function CaixaRelatoriosPage() {
                           </div>
                         </div>
 
+                        {/* Card de Estornos — só aparece se houver algum */}
+                        {totalEstornos > 0 && (
+                          <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 flex items-center justify-between">
+                            <div>
+                              <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Total Estornado no Período</p>
+                              <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-semibold mt-0.5">Já descontado das entradas acima</p>
+                            </div>
+                            <div className="text-lg font-black text-amber-400 font-mono">- {brl(totalEstornos)}</div>
+                          </div>
+                        )}
+
                         {verTudo && (
                           <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div>
@@ -343,9 +386,9 @@ export default function CaixaRelatoriosPage() {
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                           {[
-                            { label: 'Dinheiro',         valor: totalDinheiro, cor: 'text-yellow-400', desc: 'Recebido em espécie'           },
-                            { label: 'Cartão',           valor: totalCartao,   cor: 'text-purple-400', desc: 'Débito e crédito'              },
-                            { label: 'Pendente em Ficha', valor: totalFicha,   cor: 'text-orange-400', desc: 'Consumido — ainda não recebido' },
+                            { label: 'Dinheiro',          valor: totalDinheiro, cor: 'text-yellow-400', desc: 'Recebido em espécie'           },
+                            { label: 'Cartão',            valor: totalCartao,   cor: 'text-purple-400', desc: 'Débito e crédito'              },
+                            { label: 'Pendente em Ficha', valor: totalFicha,    cor: 'text-orange-400', desc: 'Consumido — ainda não recebido' },
                           ].map(({ label, valor, cor, desc }) => (
                             <div key={label} className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
@@ -444,19 +487,40 @@ export default function CaixaRelatoriosPage() {
                               </tr>
                             ) : (
                               movimentacoes.map((mov) => {
-                                const isPendente = (mov.motivo || '').toLowerCase().includes('[consumo fiado]')
+                                const isPendente  = (mov.motivo || '').toLowerCase().includes('[consumo fiado]')
+                                const isEstornado = mov.estornada === true
+                                const isEstorno   = mov.tipo === 'estorno'
+
                                 return (
-                                  <tr key={mov.id} className="hover:bg-zinc-900/30 transition-colors">
+                                  <tr
+                                    key={mov.id}
+                                    className={`transition-colors ${isEstornado ? 'opacity-40' : 'hover:bg-zinc-900/30'}`}
+                                  >
                                     <td className="px-4 md:px-6 py-4 text-zinc-500 font-semibold tracking-wide font-mono">
                                       {new Date(mov.created_at).toLocaleDateString('pt-BR')}
                                     </td>
                                     <td className="px-4 md:px-6 py-4 font-bold tracking-wide">
-                                      <span className={isPendente ? 'text-orange-400' : 'text-zinc-400'}>
+                                      <span className={
+                                        isEstornado ? 'line-through text-zinc-600' :
+                                        isEstorno   ? 'text-amber-400' :
+                                        isPendente  ? 'text-orange-400' :
+                                        'text-zinc-400'
+                                      }>
                                         {mov.motivo}
                                       </span>
-                                      {isPendente && (
+                                      {isPendente && !isEstornado && (
                                         <span className="ml-2 text-[9px] bg-orange-400/10 text-orange-400 border border-orange-400/20 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-black">
                                           pendente
+                                        </span>
+                                      )}
+                                      {isEstornado && (
+                                        <span className="ml-2 text-[9px] bg-zinc-700/40 text-zinc-500 border border-zinc-700/40 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-black">
+                                          estornado
+                                        </span>
+                                      )}
+                                      {isEstorno && (
+                                        <span className="ml-2 text-[9px] bg-amber-400/10 text-amber-400 border border-amber-400/20 px-1.5 py-0.5 rounded-full uppercase tracking-widest font-black">
+                                          estorno
                                         </span>
                                       )}
                                     </td>
@@ -464,11 +528,13 @@ export default function CaixaRelatoriosPage() {
                                       {mov.profissional || '—'}
                                     </td>
                                     <td className={`px-4 md:px-6 py-4 text-right font-bold font-mono ${
-                                      mov.tipo !== 'entrada' ? 'text-rose-400'
-                                      : isPendente ? 'text-orange-400'
-                                      : 'text-zinc-200'
+                                      isEstornado ? 'text-zinc-600 line-through' :
+                                      isEstorno   ? 'text-amber-400' :
+                                      mov.tipo !== 'entrada' ? 'text-rose-400' :
+                                      isPendente  ? 'text-orange-400' :
+                                      'text-zinc-200'
                                     }`}>
-                                      {mov.tipo === 'entrada' ? '' : '- '}
+                                      {(mov.tipo !== 'entrada' || isEstorno) ? '- ' : ''}
                                       {Number(mov.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                     </td>
                                   </tr>
