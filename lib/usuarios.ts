@@ -33,7 +33,7 @@ export interface Usuario {
 export const USUARIOS: Usuario[] = [
   {
     usuario: 'admin',
-    senha: 'joao123',
+    senha: '142936',
     perfil: 'admin',
     profissional: 'Admin',
     proprietarioCaixa: 'caixa',
