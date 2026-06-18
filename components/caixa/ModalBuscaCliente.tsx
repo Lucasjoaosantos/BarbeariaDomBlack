@@ -7,7 +7,7 @@ import { Search, X, User, Phone } from 'lucide-react'
 interface Cliente {
   id: number
   nome: string
-  telefone: string | null
+  telefone?: string | null
   permite_fiado: boolean
   ativo: boolean
 }
@@ -60,7 +60,7 @@ export function ModalBuscaCliente({
       }
 
       const { data } = await query
-      setClientes(data ?? [])
+      setClientes((data ?? []) as Cliente[])
     } finally {
       setCarregando(false)
     }
