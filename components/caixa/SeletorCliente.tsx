@@ -7,9 +7,9 @@ import { ModalBuscaCliente } from './ModalBuscaCliente'
 interface Cliente {
   id: number
   nome: string
-  telefone: string | null
+  telefone?: string | null
   permite_fiado: boolean
-  saldo_ficha: number
+  ativo: boolean
 }
 
 interface SeletorClienteProps {
@@ -22,7 +22,6 @@ export function SeletorCliente({ clienteSelecionado, onSelecionar }: SeletorClie
 
   return (
     <>
-      {/* Botão que abre o modal de busca */}
       <button
         type="button"
         onClick={() => setModalAberto(true)}
