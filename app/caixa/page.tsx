@@ -322,11 +322,23 @@ export default function CaixaPDVPage() {
         .insert({ valor_inicial: Number(trocoInicial) || 0, status: 'aberto', proprietario: proprietarioCaixa })
         .select().single()
 
-      if (error) throw error
-      setCaixaAtivo(data)
-      carregarMovimentacoes(data.id)
-      setTrocoInicial(''); setModalAbrir(false)
-      alert('Caixa aberto com sucesso!')
+// DEPOIS — com tratamento de duplicata
+if (error) {
+  // Erro do trigger ou unique index: já existe caixa aberto
+  if (
+    error.message?.includes('Já existe um caixa aberto') ||
+    error.code === '23505' // unique_violation
+  ) {
+    alert('Já existe um caixa aberto para este usuário. Feche o caixa atual antes de abrir um novo.')
+    setModalAbrir(false)
+    return
+  }
+  throw error
+}
+setCaixaAtivo(data)
+carregarMovimentacoes(data.id)
+setTrocoInicial(''); setModalAbrir(false)
+alert('Caixa aberto com sucesso!')
     } catch (err: any) { console.error(err); alert(err.message) }
   }
 
