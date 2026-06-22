@@ -512,7 +512,7 @@ alert('Caixa aberto com sucesso!')
           : ''
         alert(`✅ Pagamento misto registrado!\n💵 R$ ${valorPago.toFixed(2)} recebido via ${formaParteAgora.toUpperCase()}.${msgFicha}`)
 
-      
+      } else {
         for (const itemCarrinho of carrinho) {
           if (itemCarrinho.item.tipo === 'recebimento_ficha') continue
           const sufixo = itemCarrinho.item.tipo === 'produto' ? '[PRODUTO]' : '[SERVIÇO]'
