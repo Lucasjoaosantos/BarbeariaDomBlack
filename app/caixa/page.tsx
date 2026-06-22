@@ -102,6 +102,10 @@ export default function CaixaPDVPage() {
   const [isProcessando, setIsProcessando] = useState(false)
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
 
+  // ── PAGAMENTO MISTO ────────────────────────────────────────────────────────
+  const [valorPagoAgora, setValorPagoAgora] = useState('')         // quanto o cliente paga agora
+  const [formaParteAgora, setFormaParteAgora] = useState('dinheiro') // como paga a parte agora
+
   // ── ESTORNO ────────────────────────────────────────────────────────────────
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([])
   const [modalEstorno, setModalEstorno] = useState<Movimentacao | null>(null)
@@ -227,7 +231,8 @@ export default function CaixaPDVPage() {
       const saldo = (data || []).reduce((acc, m) => acc + Number(m.valor), 0)
       const saldoFinal = Math.max(0, saldo)
       setSaldoFichaAberto(saldoFinal)
-      setValorAbatimentoInput(saldoFinal > 0 ? saldoFinal.toFixed(2) : '')
+      // Deixa em branco para o operador informar o valor parcial que o cliente quer pagar
+      setValorAbatimentoInput('')
     } catch (err) {
       console.error('Erro ao consultar saldo da ficha:', err)
       setSaldoFichaAberto(0)
@@ -455,7 +460,59 @@ alert('Caixa aberto com sucesso!')
 
         alert('✅ Lançamento na ficha realizado!')
 
-      } else {
+      } else if (formaPagamento === 'misto') {
+        // ── PAGAMENTO MISTO: parte agora (dinheiro/pix/cartao) + restante vai pra ficha ──
+        if (!clienteSelecionado) { alert('Selecione um cliente para usar pagamento misto (ficha).'); setIsProcessando(false); return }
+
+        const valorPago = Number(valorPagoAgora) || 0
+        if (valorPago <= 0) { alert('Informe o valor que o cliente vai pagar agora.'); setIsProcessando(false); return }
+        if (valorPago > totalNovosConsumos) { alert('O valor pago agora não pode ser maior que o total do pedido.'); setIsProcessando(false); return }
+
+        const valorNaFicha = totalNovosConsumos - valorPago
+
+        // 1. Registrar a parte paga agora no caixa
+        const { error: eMisto1 } = await supabase.from('movimentacoes_caixa').insert({
+          caixa_id: idDoCaixaOficial, tipo: 'entrada', valor: valorPago,
+          motivo: `[Venda Mista] ${clienteSelecionado.nome} — ${detalhesItens} — Pago agora: R$ ${valorPago.toFixed(2)} (${formaParteAgora.toUpperCase()}) | Restante R$ ${valorNaFicha.toFixed(2)} na ficha`,
+          profissional: profissionalLogado, forma_pagamento: formaParteAgora,
+          proprietario: proprietarioCaixa
+        })
+        if (eMisto1) throw eMisto1
+
+        // 2. Lançar o valor total na ficha como consumo (débito)
+        const { error: eMisto2 } = await supabase.from('historico_ficha').insert({
+          cliente_id: Number(clienteSelecionado.id),
+          descricao: `[Consumo Misto] ${detalhesItens}`,
+          valor: totalNovosConsumos, forma_pagamento: 'ficha'
+        })
+        if (eMisto2) throw eMisto2
+
+        // 3. Lançar na ficha o abatimento da parte já paga
+        if (valorPago > 0) {
+          const { error: eMisto3 } = await supabase.from('historico_ficha').insert({
+            cliente_id: Number(clienteSelecionado.id),
+            descricao: `[Pagamento Parcial Misto] Pago R$ ${valorPago.toFixed(2)} em ${formaParteAgora.toUpperCase()}`,
+            valor: -valorPago, forma_pagamento: formaParteAgora
+          })
+          if (eMisto3) throw eMisto3
+        }
+
+        // 4. Descontar estoque dos produtos
+        for (const itemCarrinho of carrinho) {
+          if (itemCarrinho.item.tipo === 'produto') {
+            const { error } = await supabase.rpc('registrar_venda_segura', {
+              p_produto_id: itemCarrinho.item.id, p_quantidade: itemCarrinho.quantidade
+            })
+            if (error) throw error
+          }
+        }
+
+        const msgFicha = valorNaFicha > 0
+          ? `\n\n📋 Restante de ${fmt(valorNaFicha)} registrado na ficha de ${clienteSelecionado.nome}.`
+          : ''
+        alert(`✅ Pagamento misto registrado!\n💵 R$ ${valorPago.toFixed(2)} recebido via ${formaParteAgora.toUpperCase()}.${msgFicha}`)
+
+      
         for (const itemCarrinho of carrinho) {
           if (itemCarrinho.item.tipo === 'recebimento_ficha') continue
           const sufixo = itemCarrinho.item.tipo === 'produto' ? '[PRODUTO]' : '[SERVIÇO]'
@@ -502,6 +559,8 @@ alert('Caixa aberto com sucesso!')
       setSaldoFichaAberto(0)
       setValorAbatimentoInput('')
       setFormaPagamento('pix')
+      setValorPagoAgora('')
+      setFormaParteAgora('dinheiro')
       recarregarAposFinalizar(temProduto)
 
     } catch (err: any) {
@@ -663,14 +722,29 @@ alert('Caixa aberto com sucesso!')
                     </span>
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Input type="number" step="0.01" placeholder="Valor do acerto..."
-                    value={valorAbatimentoInput} onChange={(e) => setValorAbatimentoInput(e.target.value)}
-                    className="bg-zinc-950 border-zinc-800 text-zinc-200 h-10 text-xs rounded-xl" />
-                  <Button type="button" size="sm" onClick={handleAdicionarAbatimentoFichaAoCarrinho}
-                    className="bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200 text-[10px] h-10 px-4 rounded-xl font-bold tracking-widest uppercase">
-                    Incluir
-                  </Button>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold tracking-wider uppercase text-zinc-500">
+                    Valor a acertar agora (pode ser parcial)
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" step="0.01" placeholder="Ex: 50,00"
+                      value={valorAbatimentoInput} onChange={(e) => setValorAbatimentoInput(e.target.value)}
+                      className="bg-zinc-950 border-zinc-800 text-zinc-200 h-10 text-xs rounded-xl" />
+                    <Button type="button" size="sm" onClick={handleAdicionarAbatimentoFichaAoCarrinho}
+                      className="bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200 text-[10px] h-10 px-4 rounded-xl font-bold tracking-widest uppercase">
+                      Incluir
+                    </Button>
+                  </div>
+                  {valorAbatimentoInput && Number(valorAbatimentoInput) > 0 && Number(valorAbatimentoInput) < saldoFichaAberto && (
+                    <p className="text-[10px] text-amber-400/80 font-semibold">
+                      ⚠️ Ficará pendente: {fmt(saldoFichaAberto - Number(valorAbatimentoInput))}
+                    </p>
+                  )}
+                  {valorAbatimentoInput && Number(valorAbatimentoInput) >= saldoFichaAberto && (
+                    <p className="text-[10px] text-emerald-400/80 font-semibold">
+                      ✓ Ficha quitada completamente
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -785,8 +859,59 @@ alert('Caixa aberto com sucesso!')
                 {clienteSelecionado?.permite_fiado && (
                   <option value="ficha">Marcar na Ficha</option>
                 )}
+                {clienteSelecionado?.permite_fiado && (
+                  <option value="misto">💳 + 📋 Misto (parte agora + resto na ficha)</option>
+                )}
               </select>
             </div>
+
+            {/* PAINEL DO PAGAMENTO MISTO */}
+            {formaPagamento === 'misto' && (
+              <div className="bg-zinc-950 border border-blue-500/20 rounded-xl p-4 space-y-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">
+                  Pagamento Misto
+                </p>
+                <p className="text-[10px] text-zinc-500">
+                  Total do pedido: <span className="text-zinc-300 font-bold font-mono">{fmt(totalGeralCarrinho)}</span>
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold tracking-wider uppercase text-zinc-500">
+                      Valor pago agora (R$)
+                    </Label>
+                    <Input
+                      type="number" step="0.01" placeholder="Ex: 20,00"
+                      value={valorPagoAgora}
+                      onChange={(e) => setValorPagoAgora(e.target.value)}
+                      className="bg-zinc-900 border-zinc-700 h-10 text-xs rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold tracking-wider uppercase text-zinc-500">
+                      Como paga a parte
+                    </Label>
+                    <select
+                      value={formaParteAgora}
+                      onChange={(e) => setFormaParteAgora(e.target.value)}
+                      className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-xs font-semibold text-zinc-300 focus:outline-none h-10"
+                    >
+                      <option value="dinheiro">Dinheiro</option>
+                      <option value="pix">Pix</option>
+                      <option value="cartao">Cartão</option>
+                    </select>
+                  </div>
+                </div>
+                {valorPagoAgora && Number(valorPagoAgora) > 0 && (
+                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest bg-zinc-900 px-3 py-2.5 rounded-lg border border-zinc-800">
+                    <span className="text-zinc-500">Vai pra ficha:</span>
+                    <span className={`font-mono ${totalGeralCarrinho - Number(valorPagoAgora) > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                      {fmt(Math.max(0, totalGeralCarrinho - Number(valorPagoAgora)))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button type="submit"
               className="w-full bg-white text-black hover:bg-zinc-200 h-12 rounded-xl text-xs font-bold tracking-widest uppercase transition-all active:scale-[0.99] disabled:opacity-40"
               disabled={isProcessando || !caixaAtivo || carrinho.length === 0}>
