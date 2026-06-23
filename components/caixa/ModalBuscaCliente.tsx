@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useSessao } from '@/context/SessaoContext'
 import { Search, X, User, Phone } from 'lucide-react'
 
 interface Cliente {
@@ -25,6 +26,7 @@ export function ModalBuscaCliente({
   onSelecionar,
   clienteSelecionado,
 }: ModalBuscaClienteProps) {
+  const { usuario } = useSessao()
   const [busca, setBusca] = useState('')
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [carregando, setCarregando] = useState(false)
@@ -48,12 +50,18 @@ export function ModalBuscaCliente({
   async function carregarClientes(termo: string) {
     setCarregando(true)
     try {
+      // Admin e caixa veem todos. Barbeiros veem apenas seus clientes.
+      const verTudo = usuario?.permissoes?.verTudo ?? false
       let query = supabase
         .from('clientes')
         .select('id, nome, telefone, permite_fiado, ativo')
         .eq('ativo', true)
         .order('nome')
         .limit(50)
+
+      if (!verTudo && usuario?.proprietarioCaixa) {
+        query = query.eq('barbeiro_id', usuario.proprietarioCaixa)
+      }
 
       if (termo.trim()) {
         query = query.ilike('nome', `%${termo.trim()}%`)
