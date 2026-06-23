@@ -28,11 +28,19 @@ if (negado) return null
   }, [])
 
   async function buscarSaldosFichas() {
-    const { data: clientes, error: errCli } = await supabase
+    // Admin e caixa veem todos. Barbeiros veem apenas seus clientes.
+    const verTudo = usuario?.permissoes?.verTudo ?? false
+    let queryClientes = supabase
       .from('clientes')
       .select('id, nome, telefone')
       .eq('permite_fiado', true)
       .eq('ativo', true)
+
+    if (!verTudo && usuario?.proprietarioCaixa) {
+      queryClientes = queryClientes.eq('barbeiro_id', usuario.proprietarioCaixa)
+    }
+
+    const { data: clientes, error: errCli } = await queryClientes
 
     if (errCli) return console.error(errCli)
 
