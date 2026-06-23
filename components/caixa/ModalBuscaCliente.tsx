@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSessao } from '@/context/SessaoContext'
-import { Search, X, User, Phone } from 'lucide-react'
+import { Search, X, User, Phone, Scissors } from 'lucide-react'
 
 interface Cliente {
   id: number
@@ -11,6 +11,7 @@ interface Cliente {
   telefone?: string | null
   permite_fiado: boolean
   ativo: boolean
+  barbeiro_id?: string | null
 }
 
 interface ModalBuscaClienteProps {
@@ -18,6 +19,19 @@ interface ModalBuscaClienteProps {
   onFechar: () => void
   onSelecionar: (cliente: Cliente | null) => void
   clienteSelecionado: Cliente | null
+}
+
+function BadgeBarbeiro({ barbeiro_id }: { barbeiro_id?: string | null }) {
+  if (!barbeiro_id) return null
+  const isGabriel = barbeiro_id === 'gabriel'
+  return (
+    <span className={`inline-flex items-center gap-1 text-[9px] font-black tracking-widest uppercase ${
+      isGabriel ? 'text-blue-400' : 'text-orange-400'
+    }`}>
+      <Scissors size={8} />
+      {isGabriel ? 'Gabriel' : 'Eduardo'}
+    </span>
+  )
 }
 
 export function ModalBuscaCliente({
@@ -54,7 +68,7 @@ export function ModalBuscaCliente({
       const verTudo = usuario?.permissoes?.verTudo ?? false
       let query = supabase
         .from('clientes')
-        .select('id, nome, telefone, permite_fiado, ativo')
+        .select('id, nome, telefone, permite_fiado, ativo, barbeiro_id')
         .eq('ativo', true)
         .order('nome')
         .limit(50)
@@ -80,6 +94,8 @@ export function ModalBuscaCliente({
   }
 
   if (!aberto) return null
+
+  const verTudo = usuario?.permissoes?.verTudo ?? false
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -174,9 +190,15 @@ export function ModalBuscaCliente({
                       {cliente.telefone}
                     </p>
                   )}
-                  {cliente.permite_fiado && (
-                    <p className="text-[10px] text-amber-500 font-semibold">• Possui Ficha</p>
-                  )}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {cliente.permite_fiado && (
+                      <p className="text-[10px] text-amber-500 font-semibold">• Possui Ficha</p>
+                    )}
+                    {/* Badge do barbeiro — só aparece para admin/caixa */}
+                    {verTudo && (
+                      <BadgeBarbeiro barbeiro_id={cliente.barbeiro_id} />
+                    )}
+                  </div>
                 </div>
                 {clienteSelecionado?.id === cliente.id && (
                   <div className="ml-auto w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
