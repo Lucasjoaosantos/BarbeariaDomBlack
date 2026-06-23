@@ -15,6 +15,21 @@ interface Cliente {
   ativo: boolean
   saldo: number
   movimentacoes: any[]
+  barbeiro_id?: string | null
+}
+
+function BadgeBarbeiro({ barbeiro_id }: { barbeiro_id?: string | null }) {
+  if (!barbeiro_id) return null
+  const isGabriel = barbeiro_id === 'gabriel'
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-black tracking-widest uppercase border ${
+      isGabriel
+        ? 'bg-blue-950/60 text-blue-400 border-blue-800/60'
+        : 'bg-orange-950/60 text-orange-400 border-orange-800/60'
+    }`}>
+      ✂ {isGabriel ? 'Gabriel' : 'Eduardo'}
+    </span>
+  )
 }
 
 export default function ClientesPage() {
@@ -58,10 +73,6 @@ export default function ClientesPage() {
       const clientesProcessados = (dataClientes || []).map(cliente => {
         const transacoes = historico.filter(h => h.cliente_id === cliente.id)
 
-        // BUG 1: lógica corrigida para somar todos os valores diretamente.
-        // Débitos salvos com valor POSITIVO (forma_pagamento = 'ficha')
-        // Créditos salvos com valor NEGATIVO (acertos via caixa com qualquer forma de pagamento)
-        // Isso funciona independente de como a forma de pagamento foi registrada.
         const saldoCalculado = transacoes.reduce((acc, mov) => {
           return acc + Number(mov.valor)
         }, 0)
@@ -93,6 +104,8 @@ export default function ClientesPage() {
     )
   }
 
+  const verTudo = usuario?.permissoes?.verTudo ?? false
+
   return (
     <div className="flex min-h-screen bg-black text-white font-sans antialiased selection:bg-white selection:text-black">
       <Sidebar />
@@ -119,6 +132,10 @@ export default function ClientesPage() {
                   <th className="w-12 px-4 py-4 text-center"></th>
                   <th className="px-6 py-4 text-left">Nome</th>
                   <th className="px-6 py-4 text-left hidden sm:table-cell">Telefone</th>
+                  {/* Coluna Barbeiro visível apenas para admin/caixa */}
+                  {verTudo && (
+                    <th className="px-6 py-4 text-left hidden md:table-cell">Barbeiro</th>
+                  )}
                   <th className="px-6 py-4 text-left">Ficha Status</th>
                   <th className="px-6 py-4 text-right">Saldo Ficha</th>
                 </tr>
@@ -127,7 +144,7 @@ export default function ClientesPage() {
               <tbody className="divide-y divide-zinc-800/40 text-xs">
                 {clientes.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-zinc-500 tracking-wider font-bold uppercase">
+                    <td colSpan={verTudo ? 6 : 5} className="px-6 py-12 text-center text-zinc-500 tracking-wider font-bold uppercase">
                       Nenhum cliente cadastrado ainda.
                     </td>
                   </tr>
@@ -158,6 +175,13 @@ export default function ClientesPage() {
                             {cliente.telefone || '—'}
                           </td>
 
+                          {/* Coluna Barbeiro — só aparece para admin/caixa */}
+                          {verTudo && (
+                            <td className="px-6 py-4 hidden md:table-cell">
+                              <BadgeBarbeiro barbeiro_id={cliente.barbeiro_id} />
+                            </td>
+                          )}
+
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] font-black tracking-wider uppercase border ${
                               cliente.permite_fiado
@@ -182,7 +206,7 @@ export default function ClientesPage() {
                         {/* Extrato Detalhado */}
                         {cliente.permite_fiado && isExpandido && (
                           <tr className="bg-zinc-950/40 border-b border-zinc-800/40">
-                            <td colSpan={5} className="px-6 md:px-10 py-5">
+                            <td colSpan={verTudo ? 6 : 5} className="px-6 md:px-10 py-5">
                               <div className="rounded-xl border border-zinc-800/60 bg-black/40 p-5 shadow-inner">
                                 <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-4 border-b border-zinc-800/40 pb-2">
                                   Histórico Detalhado da Ficha
@@ -195,7 +219,6 @@ export default function ClientesPage() {
                                 ) : (
                                   <div className="space-y-3 max-h-52 overflow-y-auto pr-2">
                                     {cliente.movimentacoes.map((mov: any) => {
-                                      // Crédito = valor negativo (acerto/pagamento), Débito = valor positivo (consumo)
                                       const isDebito = Number(mov.valor) > 0
                                       return (
                                         <div key={mov.id} className="flex justify-between items-start border-b border-zinc-900 pb-3 last:border-0 last:pb-0 gap-4">
