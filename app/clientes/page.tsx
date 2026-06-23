@@ -30,11 +30,19 @@ export default function ClientesPage() {
   async function carregarDados() {
     setLoading(true)
     try {
-      const { data: dataClientes, error: errCli } = await supabase
+      // Admin e caixa veem todos. Barbeiros veem apenas seus clientes.
+      const verTudo = usuario?.permissoes?.verTudo ?? false
+      let query = supabase
         .from('clientes')
         .select('*')
         .eq('ativo', true)
         .order('nome', { ascending: true })
+
+      if (!verTudo && usuario?.proprietarioCaixa) {
+        query = query.eq('barbeiro_id', usuario.proprietarioCaixa)
+      }
+
+      const { data: dataClientes, error: errCli } = await query
 
       if (errCli) throw errCli
 
