@@ -3,6 +3,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useSessao } from '@/context/SessaoContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,6 +14,7 @@ interface NovoClienteModalProps {
 }
 
 export function NovoClienteModal({ onSuccess }: NovoClienteModalProps) {
+  const { usuario } = useSessao()
   const [open, setOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
@@ -57,13 +59,17 @@ export function NovoClienteModal({ onSuccess }: NovoClienteModalProps) {
         return
       }
 
+      // Barbeiros cadastram clientes com seu próprio ID. Caixa/admin não atribuem dono.
+      const barbeiro_id = usuario?.perfil === 'barbeiro' ? usuario.proprietarioCaixa : null
+
       const { error: erroInsert } = await supabase
         .from('clientes')
         .insert({
           nome: nome.trim(),
           telefone: apenasNumeros,
           permite_fiado: permiteFiado,
-          ativo: true
+          ativo: true,
+          barbeiro_id
         })
 
       if (erroInsert) {
