@@ -18,6 +18,7 @@ interface Cliente {
   permite_fiado: boolean
   ativo: boolean
   telefone?: string | null
+  barbeiro_id?: string | null
 }
 
 interface Caixa {
@@ -132,6 +133,17 @@ export default function CaixaPDVPage() {
 
   const profissionalLogado = usuario?.profissional ?? 'Caixa'
   const proprietarioCaixa = usuario?.proprietarioCaixa ?? 'caixa'
+
+  // Detecta atendimento cruzado: barbeiro atendendo cliente do outro
+  const clienteEhPuxado = !!(
+    clienteSelecionado?.barbeiro_id &&
+    clienteSelecionado.barbeiro_id !== proprietarioCaixa &&
+    usuario?.perfil === 'barbeiro'
+  )
+  const nomeDonoDocliente = clienteSelecionado?.barbeiro_id === 'gabriel' ? 'Gabriel' : 'Eduardo'
+  const tagCruzado = clienteEhPuxado
+    ? ` ⚠ ATENDIMENTO CRUZADO: atendido por ${profissionalLogado} (cliente de ${nomeDonoDocliente})`
+    : ''
 
   async function inicializarCaixa(forcarEstaticos = false) {
     setLoading(true)
@@ -426,7 +438,7 @@ alert('Caixa aberto com sucesso!')
         if (totalNovosConsumos > 0) {
           const { error } = await supabase.from('historico_ficha').insert({
             cliente_id: Number(clienteSelecionado.id),
-            descricao: `[Consumo Fiado] ${detalhesItens}`,
+            descricao: `[Consumo Fiado] ${detalhesItens}${tagCruzado}`,
             valor: totalNovosConsumos, forma_pagamento: 'ficha'
           })
           if (error) throw error
@@ -442,7 +454,7 @@ alert('Caixa aberto com sucesso!')
         if (totalNovosConsumos > 0) {
           const { error } = await supabase.from('movimentacoes_caixa').insert({
             caixa_id: idDoCaixaOficial, tipo: 'entrada', valor: totalNovosConsumos,
-            motivo: `[Consumo Fiado] ${clienteSelecionado.nome} — ${detalhesItens}`,
+            motivo: `[Consumo Fiado] ${clienteSelecionado.nome} — ${detalhesItens}${tagCruzado}`,
             profissional: profissionalLogado, forma_pagamento: 'ficha',
             proprietario: proprietarioCaixa
           })
@@ -473,7 +485,7 @@ alert('Caixa aberto com sucesso!')
         // 1. Registrar a parte paga agora no caixa
         const { error: eMisto1 } = await supabase.from('movimentacoes_caixa').insert({
           caixa_id: idDoCaixaOficial, tipo: 'entrada', valor: valorPago,
-          motivo: `[Venda Mista] ${clienteSelecionado.nome} — ${detalhesItens} — Pago agora: R$ ${valorPago.toFixed(2)} (${formaParteAgora.toUpperCase()}) | Restante R$ ${valorNaFicha.toFixed(2)} na ficha`,
+          motivo: `[Venda Mista] ${clienteSelecionado.nome} — ${detalhesItens} — Pago agora: R$ ${valorPago.toFixed(2)} (${formaParteAgora.toUpperCase()}) | Restante R$ ${valorNaFicha.toFixed(2)} na ficha${tagCruzado}`,
           profissional: profissionalLogado, forma_pagamento: formaParteAgora,
           proprietario: proprietarioCaixa
         })
@@ -482,7 +494,7 @@ alert('Caixa aberto com sucesso!')
         // 2. Lançar o valor total na ficha como consumo (débito)
         const { error: eMisto2 } = await supabase.from('historico_ficha').insert({
           cliente_id: Number(clienteSelecionado.id),
-          descricao: `[Consumo Misto] ${detalhesItens}`,
+          descricao: `[Consumo Misto] ${detalhesItens}${tagCruzado}`,
           valor: totalNovosConsumos, forma_pagamento: 'ficha'
         })
         if (eMisto2) throw eMisto2
@@ -518,7 +530,7 @@ alert('Caixa aberto com sucesso!')
           const sufixo = itemCarrinho.item.tipo === 'produto' ? '[PRODUTO]' : '[SERVIÇO]'
           const { error } = await supabase.from('movimentacoes_caixa').insert({
             caixa_id: idDoCaixaOficial, tipo: 'entrada', valor: itemCarrinho.valorTotal,
-            motivo: `[Venda] ${itemCarrinho.quantidade}x ${itemCarrinho.item.nome} ${sufixo} - Cliente: ${clienteSelecionado?.nome || 'Avulso'} - Profissional: ${profissionalLogado} - Forma: ${formaPagamento.toUpperCase()}`,
+            motivo: `[Venda] ${itemCarrinho.quantidade}x ${itemCarrinho.item.nome} ${sufixo} - Cliente: ${clienteSelecionado?.nome || 'Avulso'} - Profissional: ${profissionalLogado} - Forma: ${formaPagamento.toUpperCase()}${tagCruzado}`,
             profissional: profissionalLogado,
             forma_pagamento: formaPagamento,
             proprietario: proprietarioCaixa
@@ -529,7 +541,7 @@ alert('Caixa aberto com sucesso!')
         if (totalPAGODaFichaAntiga > 0 && clienteSelecionado) {
           const { error: e1 } = await supabase.from('historico_ficha').insert({
             cliente_id: Number(clienteSelecionado.id),
-            descricao: `[Acerto via Caixa] Pago em ${formaPagamento.toUpperCase()} — R$ ${totalPAGODaFichaAntiga.toFixed(2)}`,
+            descricao: `[Acerto via Caixa] Pago em ${formaPagamento.toUpperCase()} — R$ ${totalPAGODaFichaAntiga.toFixed(2)}${tagCruzado}`,
             valor: -totalPAGODaFichaAntiga, forma_pagamento: formaPagamento
           })
           if (e1) throw e1
@@ -936,20 +948,32 @@ alert('Caixa aberto com sucesso!')
                   {movimentacoes.map((mov) => {
                     const podeEstornar = mov.tipo === 'entrada' && !mov.estornada
                     const hora = new Date(mov.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                    const isCruzado = (mov.motivo ?? '').includes('ATENDIMENTO CRUZADO')
+                    const motivoLimpo = (mov.motivo ?? '').replace(/ ⚠ ATENDIMENTO CRUZADO:.*$/, '')
+                    const matchCruzado = (mov.motivo ?? '').match(/atendido por ([^\s(]+) \(cliente de ([^)]+)\)/)
+                    const quemAtendeu = matchCruzado ? matchCruzado[1] : null
+                    const clienteDe = matchCruzado ? matchCruzado[2] : null
                     return (
                       <div key={mov.id}
-                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
-                          mov.estornada ? 'opacity-40 bg-zinc-800/20' : 'bg-zinc-800/40 hover:bg-zinc-800/60'
+                        className={`flex items-start gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+                          mov.estornada ? 'opacity-40 bg-zinc-800/20' :
+                          isCruzado ? 'bg-amber-950/20 border border-amber-800/30 hover:bg-amber-950/30' :
+                          'bg-zinc-800/40 hover:bg-zinc-800/60'
                         }`}
                       >
                         <div className="flex-1 min-w-0">
                           <p className={`text-xs leading-snug truncate ${mov.estornada ? 'line-through text-zinc-500' : 'text-zinc-300'}`}>
-                            {mov.motivo ?? '—'}
+                            {motivoLimpo ?? '—'}
                           </p>
-                          <div className="flex items-center gap-2 mt-0.5">
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="text-[10px] text-zinc-600">{hora}</span>
                             {mov.forma_pagamento && <span className="text-[10px] text-zinc-600 uppercase">· {mov.forma_pagamento}</span>}
                             {mov.estornada && <span className="text-[10px] text-amber-500/80 font-medium">· ESTORNADO</span>}
+                            {isCruzado && quemAtendeu && clienteDe && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[9px] font-black tracking-widest uppercase text-amber-400">
+                                ⚠ {quemAtendeu} atendeu · cliente de {clienteDe}
+                              </span>
+                            )}
                           </div>
                         </div>
                         <span className={`text-sm font-bold tabular-nums flex-shrink-0 ${
