@@ -220,10 +220,15 @@ export default function ClientesPage() {
                                   <div className="space-y-3 max-h-52 overflow-y-auto pr-2">
                                     {cliente.movimentacoes.map((mov: any) => {
                                       const isDebito = Number(mov.valor) > 0
+                                      const isCruzado = (mov.descricao ?? '').includes('ATENDIMENTO CRUZADO')
+                                      // Extrai "atendido por X" do texto para exibir limpo
+                                      const descricaoLimpa = (mov.descricao ?? '').replace(/ ⚠ ATENDIMENTO CRUZADO:.*$/, '')
+                                      const matchAtendido = (mov.descricao ?? '').match(/atendido por ([^\s(]+)/)
+                                      const quemAtendeu = matchAtendido ? matchAtendido[1] : null
                                       return (
-                                        <div key={mov.id} className="flex justify-between items-start border-b border-zinc-900 pb-3 last:border-0 last:pb-0 gap-4">
+                                        <div key={mov.id} className={`flex justify-between items-start border-b pb-3 last:border-0 last:pb-0 gap-4 ${isCruzado ? 'border-amber-900/40' : 'border-zinc-900'}`}>
                                           <div className="space-y-1 flex-1 min-w-0">
-                                            <p className="font-bold text-zinc-300 tracking-wide truncate">{mov.descricao}</p>
+                                            <p className="font-bold text-zinc-300 tracking-wide truncate">{descricaoLimpa}</p>
                                             <p className="text-[10px] text-zinc-500 font-semibold font-mono">
                                               {new Date(mov.created_at).toLocaleString('pt-BR')}
                                               <span className="text-zinc-600 mx-2">•</span>
@@ -231,6 +236,12 @@ export default function ClientesPage() {
                                                 {isDebito ? 'DÉBITO' : 'CRÉDITO / ACERTO'}
                                               </span>
                                             </p>
+                                            {/* Badge de atendimento cruzado — bem evidente */}
+                                            {isCruzado && quemAtendeu && (
+                                              <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-[9px] font-black tracking-widest uppercase text-amber-400">
+                                                ⚠ Atendido por {quemAtendeu}
+                                              </span>
+                                            )}
                                           </div>
                                           <span className={`font-bold font-mono flex-shrink-0 ${isDebito ? 'text-rose-400' : 'text-emerald-400'}`}>
                                             {isDebito ? '+' : ''}
