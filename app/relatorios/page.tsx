@@ -4,11 +4,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Sidebar } from '@/components/Sidebar'
 import { supabase } from '@/lib/supabase'
-import { DollarSign, User, Shield, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react'
+import { DollarSign, User, Shield, TrendingUp, ChevronDown, ChevronUp, CalendarDays, X } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts'
 import { useGuard } from '@/hooks/useGuard'
 
 type TabId = 'financeiro' | 'barbeiros' | 'grafico' | 'lancamentos'
+type PeriodoPreset = 'hoje' | '7dias' | 'mes' | 'ano' | 'custom'
 
 interface Movimentacao {
   id: number
@@ -39,13 +40,27 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'lancamentos', label: 'Lançamentos' },
 ]
 
+// Formata "2026-06-25" para exibição amigável
+function formatarDataExibicao(iso: string) {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y}`
+}
+
 export default function CaixaRelatoriosPage() {
   const { usuario, negado } = useGuard('relatorios')
 
   const [loading, setLoading] = useState(true)
-  const [periodo, setPeriodo] = useState<'hoje' | '7dias' | 'mes' | 'ano'>('mes')
+  const [periodo, setPeriodo] = useState<PeriodoPreset>('mes')
   const [abasAbertas,  setAbasAbertas]  = useState<Set<TabId>>(new Set())
   const [abasVisiveis, setAbasVisiveis] = useState<Set<TabId>>(new Set())
+
+  // Filtro customizado
+  const [mostrarFiltroCustom, setMostrarFiltroCustom] = useState(false)
+  const [dataInicioCustm, setDataInicioCustm] = useState('')
+  const [dataFimCustm,    setDataFimCustm]    = useState('')
+  const [labelCustom,     setLabelCustom]     = useState('')
+
   const [faturamentoGabriel,     setFaturamentoGabriel]     = useState(0)
   const [faturamentoEduardo,     setFaturamentoEduardo]     = useState(0)
   const [faturamentoGeral,       setFaturamentoGeral]       = useState(0)
@@ -68,32 +83,34 @@ export default function CaixaRelatoriosPage() {
   const carregarRelatorios = useCallback(async () => {
     setLoading(true)
     try {
-      // Calcula dataInicio sempre no fuso de Brasília (UTC-3)
-      // para não perder lançamentos feitos à noite que têm created_at UTC do dia seguinte
-      const OFFSET_BRASILIA = -3 * 60 // minutos
+      const OFFSET_BRASILIA = -3 * 60
       const agoraUTC = new Date()
-      // Cria "agora" ajustado para Brasília
       const agoraBrasil = new Date(agoraUTC.getTime() + (OFFSET_BRASILIA - agoraUTC.getTimezoneOffset()) * 60000)
 
       let dataInicio: Date
+      let dataFim: Date | null = null
 
-      if (periodo === 'hoje') {
-        // Meia-noite de Brasília em UTC
+      if (periodo === 'custom' && dataInicioCustm) {
+        // Dia específico: dataInicio = dataFim (dia inteiro)
+        const [y, m, d] = dataInicioCustm.split('-').map(Number)
+        dataInicio = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0)) // 00:00 Brasília
+
+        if (dataFimCustm && dataFimCustm !== dataInicioCustm) {
+          // Período: até o fim do dia selecionado (23:59:59 Brasília = próximo dia 02:59:59 UTC)
+          const [y2, m2, d2] = dataFimCustm.split('-').map(Number)
+          dataFim = new Date(Date.UTC(y2, m2 - 1, d2 + 1, 2, 59, 59, 999))
+        } else {
+          // Dia único: fim = início + 23h59m59s Brasília
+          dataFim = new Date(Date.UTC(y, m - 1, d + 1, 2, 59, 59, 999))
+        }
+      } else if (periodo === 'hoje') {
         dataInicio = new Date(Date.UTC(
-          agoraBrasil.getFullYear(),
-          agoraBrasil.getMonth(),
-          agoraBrasil.getDate(),
-          3, 0, 0, 0  // 00:00 Brasília = 03:00 UTC
+          agoraBrasil.getFullYear(), agoraBrasil.getMonth(), agoraBrasil.getDate(), 3, 0, 0, 0
         ))
       } else if (periodo === '7dias') {
         dataInicio = new Date(agoraUTC.getTime() - 7 * 24 * 60 * 60 * 1000)
       } else if (periodo === 'mes') {
-        dataInicio = new Date(Date.UTC(
-          agoraBrasil.getFullYear(),
-          agoraBrasil.getMonth(),
-          1,
-          3, 0, 0, 0
-        ))
+        dataInicio = new Date(Date.UTC(agoraBrasil.getFullYear(), agoraBrasil.getMonth(), 1, 3, 0, 0, 0))
       } else {
         dataInicio = new Date(Date.UTC(agoraBrasil.getFullYear(), 0, 1, 3, 0, 0, 0))
       }
@@ -104,6 +121,10 @@ export default function CaixaRelatoriosPage() {
         .gte('created_at', dataInicio.toISOString())
         .order('created_at', { ascending: false })
 
+      if (dataFim) {
+        query = query.lte('created_at', dataFim.toISOString())
+      }
+
       if (!verTudo) {
         query = query.eq('proprietario', proprietarioCaixa)
       }
@@ -111,30 +132,23 @@ export default function CaixaRelatoriosPage() {
       const { data: movs, error: errMovs } = await query
       if (errMovs) throw errMovs
 
-      const { data: fichaRows, error: errFicha } = await supabase
+      let fichaQuery = supabase
         .from('historico_ficha')
         .select('valor')
         .gte('created_at', dataInicio.toISOString())
 
+      if (dataFim) {
+        fichaQuery = fichaQuery.lte('created_at', dataFim.toISOString())
+      }
+
+      const { data: fichaRows, error: errFicha } = await fichaQuery
       if (errFicha) throw errFicha
 
-      const saldoLiquidoFicha = (fichaRows || []).reduce(
-        (acc, row) => acc + Number(row.valor), 0
-      )
-
+      const saldoLiquidoFicha = (fichaRows || []).reduce((acc, row) => acc + Number(row.valor), 0)
       const listaMovs = (movs as Movimentacao[]) || []
 
-      let totalGabriel = 0
-      let totalEduardo = 0
-      let totalGeral   = 0
-      let totalGlobal  = 0
-      let entradas     = 0
-      let saidas       = 0
-      let estornos     = 0
-      let pix          = 0
-      let dinheiro     = 0
-      let cartao       = 0
-
+      let totalGabriel = 0, totalEduardo = 0, totalGeral = 0, totalGlobal = 0
+      let entradas = 0, saidas = 0, estornos = 0, pix = 0, dinheiro = 0, cartao = 0
       const listaFiltrada: Movimentacao[] = []
 
       for (const m of listaMovs) {
@@ -142,47 +156,35 @@ export default function CaixaRelatoriosPage() {
         const prop   = (m.proprietario || 'caixa').toLowerCase()
         const motivo = (m.motivo || '').toLowerCase()
 
-        // ── ESTORNO: descontar do total e mostrar na lista ─────────────────
         if (m.tipo === 'estorno') {
           estornos += valor
           listaFiltrada.push(m)
           continue
         }
-
-        // ── ENTRADA ESTORNADA: ignorar completamente nos cálculos ──────────
         if (m.tipo === 'entrada' && m.estornada === true) {
-          // Ainda aparece na lista (riscado), mas não entra nos totais
           listaFiltrada.push(m)
           continue
         }
-
         if (m.tipo === 'entrada') {
           const isConsumoFiado = motivo.includes('[consumo fiado]')
-
           if (!isConsumoFiado) {
             entradas    += valor
             totalGlobal += valor
-
             if (prop === 'gabriel')      totalGabriel += valor
             else if (prop === 'eduardo') totalEduardo += valor
             else                         totalGeral   += valor
-
             const forma = detectarFormaPagamento(m)
             if (forma === 'pix')           pix      += valor
             else if (forma === 'dinheiro') dinheiro += valor
             else if (forma === 'cartao')   cartao   += valor
           }
-
           listaFiltrada.push(m)
-
         } else {
-          // Saída / sangria
           saidas += valor
           listaFiltrada.push(m)
         }
       }
 
-      // Gráfico: só entradas não estornadas e não fiado
       const porDia: Record<string, number> = {}
       for (const mov of listaMovs) {
         if (mov.tipo !== 'entrada') continue
@@ -192,7 +194,6 @@ export default function CaixaRelatoriosPage() {
         porDia[d] = (porDia[d] || 0) + Number(mov.valor || 0)
       }
 
-      // Desconta estornos do faturamento
       const entradasLiquidas = entradas - estornos
 
       setDadosGrafico(Object.entries(porDia).map(([data, valor]) => ({ data, valor })))
@@ -214,13 +215,13 @@ export default function CaixaRelatoriosPage() {
     } finally {
       setLoading(false)
     }
-  }, [periodo, usuario])
+  }, [periodo, usuario, dataInicioCustm, dataFimCustm])
 
   useEffect(() => {
     setAbasAbertas(new Set(abasVisiveis))
     carregarRelatorios()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, usuario])
+  }, [periodo, usuario, dataInicioCustm, dataFimCustm])
 
   function toggleAba(id: TabId) {
     setAbasVisiveis((prev) => {
@@ -233,6 +234,30 @@ export default function CaixaRelatoriosPage() {
       }
       return next
     })
+  }
+
+  function aplicarFiltroCustom() {
+    if (!dataInicioCustm) return
+    if (dataFimCustm && dataFimCustm < dataInicioCustm) {
+      alert('A data final não pode ser anterior à data inicial.')
+      return
+    }
+    const mesmoDia = !dataFimCustm || dataFimCustm === dataInicioCustm
+    if (mesmoDia) {
+      setLabelCustom(formatarDataExibicao(dataInicioCustm))
+    } else {
+      setLabelCustom(`${formatarDataExibicao(dataInicioCustm)} → ${formatarDataExibicao(dataFimCustm)}`)
+    }
+    setPeriodo('custom')
+    setMostrarFiltroCustom(false)
+  }
+
+  function limparFiltroCustom() {
+    setDataInicioCustm('')
+    setDataFimCustm('')
+    setLabelCustom('')
+    setPeriodo('mes')
+    setMostrarFiltroCustom(false)
   }
 
   if (negado) return null
@@ -257,7 +282,7 @@ export default function CaixaRelatoriosPage() {
         </div>
 
         {/* CABEÇALHO */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-6">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-zinc-800 pb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-black tracking-widest uppercase">Relatórios</h1>
             <p className="text-zinc-500 text-xs tracking-wider uppercase mt-1.5 font-semibold">
@@ -268,21 +293,97 @@ export default function CaixaRelatoriosPage() {
             </p>
           </div>
 
-          <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/80 text-[10px] font-bold tracking-wider uppercase">
-            {(['hoje', '7dias', 'mes', 'ano'] as const).map((p) => (
+          {/* FILTROS DE PERÍODO */}
+          <div className="flex flex-col gap-2 items-end">
+            {/* Botões preset */}
+            <div className="flex flex-wrap gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800/80 text-[10px] font-bold tracking-wider uppercase">
+              {(['hoje', '7dias', 'mes', 'ano'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => { setPeriodo(p); setLabelCustom(''); setMostrarFiltroCustom(false) }}
+                  className={`px-3 py-2 rounded-lg font-bold transition-all ${
+                    periodo === p ? 'bg-white text-black' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {p === 'hoje'  && 'Hoje'}
+                  {p === '7dias' && '7 dias'}
+                  {p === 'mes'   && 'Mês'}
+                  {p === 'ano'   && 'Ano'}
+                </button>
+              ))}
+
+              {/* Botão período custom */}
               <button
-                key={p}
-                onClick={() => setPeriodo(p)}
-                className={`px-3 py-2 rounded-lg font-bold transition-all ${
-                  periodo === p ? 'bg-white text-black' : 'text-zinc-500 hover:text-zinc-300'
+                onClick={() => setMostrarFiltroCustom((v) => !v)}
+                className={`px-3 py-2 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                  periodo === 'custom' ? 'bg-white text-black' : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
-                {p === 'hoje'  && 'Hoje'}
-                {p === '7dias' && '7 dias'}
-                {p === 'mes'   && 'Mês'}
-                {p === 'ano'   && 'Ano'}
+                <CalendarDays size={12} />
+                {periodo === 'custom' && labelCustom ? labelCustom : 'Data'}
               </button>
-            ))}
+
+              {/* Limpar filtro custom */}
+              {periodo === 'custom' && (
+                <button
+                  onClick={limparFiltroCustom}
+                  className="px-2 py-2 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors"
+                  title="Limpar filtro de data"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Painel de seleção de data */}
+            {mostrarFiltroCustom && (
+              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 shadow-2xl w-full sm:w-auto min-w-[280px] space-y-3 z-10">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                  Filtrar por data
+                </p>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    Dia / Data Inicial
+                  </label>
+                  <input
+                    type="date"
+                    value={dataInicioCustm}
+                    onChange={(e) => setDataInicioCustm(e.target.value)}
+                    className="w-full bg-black border border-zinc-800 rounded-xl h-10 px-3 text-xs text-white font-mono focus:outline-none focus:ring-1 focus:ring-zinc-600 [color-scheme:dark]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    Data Final <span className="text-zinc-600 normal-case font-normal">(opcional — deixe vazio para dia único)</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={dataFimCustm}
+                    min={dataInicioCustm}
+                    onChange={(e) => setDataFimCustm(e.target.value)}
+                    className="w-full bg-black border border-zinc-800 rounded-xl h-10 px-3 text-xs text-white font-mono focus:outline-none focus:ring-1 focus:ring-zinc-600 [color-scheme:dark]"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={aplicarFiltroCustom}
+                    disabled={!dataInicioCustm}
+                    className="flex-1 bg-white text-black h-9 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-200 disabled:opacity-30"
+                  >
+                    Aplicar
+                  </button>
+                  <button
+                    onClick={() => setMostrarFiltroCustom(false)}
+                    className="flex-1 bg-zinc-900 text-zinc-400 h-9 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -359,7 +460,6 @@ export default function CaixaRelatoriosPage() {
                           </div>
                         </div>
 
-                        {/* Card de Estornos — só aparece se houver algum */}
                         {totalEstornos > 0 && (
                           <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 flex items-center justify-between">
                             <div>
@@ -407,7 +507,6 @@ export default function CaixaRelatoriosPage() {
                     {tab.id === 'barbeiros' && (
                       <div className="p-4 md:p-5 pt-0">
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-
                           {(verTudo || proprietarioCaixa === 'gabriel') && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
@@ -418,7 +517,6 @@ export default function CaixaRelatoriosPage() {
                               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Efetivamente recebido no período</p>
                             </div>
                           )}
-
                           {(verTudo || proprietarioCaixa === 'eduardo') && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
@@ -429,7 +527,6 @@ export default function CaixaRelatoriosPage() {
                               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider mt-1.5">Efetivamente recebido no período</p>
                             </div>
                           )}
-
                           {verTudo && (
                             <div className="bg-zinc-950 border border-zinc-800/60 rounded-xl p-4 md:p-5">
                               <div className="flex justify-between items-center mb-3">
