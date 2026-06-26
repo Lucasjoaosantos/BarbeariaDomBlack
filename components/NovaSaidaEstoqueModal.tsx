@@ -55,10 +55,20 @@ export function NovaSaidaEstoqueModal({ onSuccess }: NovaSaidaEstoqueModalProps)
       return
     }
 
-    const produto = produtos.find((p) => p.id === Number(produtoId))
-    if (!produto) return
+    // FIX: comparar como string para garantir compatibilidade com o Select do Radix UI
+    const produto = produtos.find((p) => String(p.id) === String(produtoId))
+    if (!produto) {
+      alert('Produto não encontrado. Tente novamente.')
+      return
+    }
 
-    if (Number(quantidade) > Number(produto.estoque)) {
+    const qtd = Number(quantidade)
+    if (isNaN(qtd) || qtd <= 0) {
+      alert('Informe uma quantidade válida.')
+      return
+    }
+
+    if (qtd > Number(produto.estoque)) {
       alert(`Estoque insuficiente. Saldo atual: ${produto.estoque} unidades.`)
       return
     }
@@ -66,24 +76,28 @@ export function NovaSaidaEstoqueModal({ onSuccess }: NovaSaidaEstoqueModalProps)
     setIsSaving(true)
 
     try {
-      const novoEstoque = Number(produto.estoque) - Number(quantidade)
+      const novoEstoque = Number(produto.estoque) - qtd
 
-      const { error } = await supabase
+      // FIX: primeiro atualiza o estoque do produto
+      const { error: errorUpdate } = await supabase
+        .from('produtos')
+        .update({ estoque: novoEstoque })
+        .eq('id', produto.id)
+
+      if (errorUpdate) throw errorUpdate
+
+      // Depois registra a movimentação
+      const { error: errorInsert } = await supabase
         .from('movimentacoes_estoque')
         .insert({
           produto_id: produto.id,
           tipo: motivo,
-          quantidade: Number(quantidade),
+          quantidade: qtd,
           observacao,
           usuario_nome: 'admin',
         })
 
-      if (error) throw error
-
-      await supabase
-        .from('produtos')
-        .update({ estoque: novoEstoque })
-        .eq('id', produto.id)
+      if (errorInsert) throw errorInsert
 
       setProdutoId('')
       setQuantidade('')
@@ -95,6 +109,7 @@ export function NovaSaidaEstoqueModal({ onSuccess }: NovaSaidaEstoqueModalProps)
       setOpen(false)
     } catch (err) {
       console.error(err)
+      alert('Erro ao registrar a baixa. Verifique o console e tente novamente.')
     } finally {
       setIsSaving(false)
     }
