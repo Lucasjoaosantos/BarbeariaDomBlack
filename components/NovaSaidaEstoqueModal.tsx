@@ -55,7 +55,7 @@ export function NovaSaidaEstoqueModal({ onSuccess }: NovaSaidaEstoqueModalProps)
       return
     }
 
-    // FIX: comparar como string para garantir compatibilidade com o Select do Radix UI
+    // FIX 1: comparar como string para garantir compatibilidade com o Select do Radix UI
     const produto = produtos.find((p) => String(p.id) === String(produtoId))
     if (!produto) {
       alert('Produto não encontrado. Tente novamente.')
@@ -78,7 +78,7 @@ export function NovaSaidaEstoqueModal({ onSuccess }: NovaSaidaEstoqueModalProps)
     try {
       const novoEstoque = Number(produto.estoque) - qtd
 
-      // FIX: primeiro atualiza o estoque do produto
+      // FIX 2: atualiza o estoque primeiro e verifica o erro
       const { error: errorUpdate } = await supabase
         .from('produtos')
         .update({ estoque: novoEstoque })
@@ -86,7 +86,7 @@ export function NovaSaidaEstoqueModal({ onSuccess }: NovaSaidaEstoqueModalProps)
 
       if (errorUpdate) throw errorUpdate
 
-      // Depois registra a movimentação
+      // FIX 3: 'quebra' e 'consumo' agora existem no constraint do banco
       const { error: errorInsert } = await supabase
         .from('movimentacoes_estoque')
         .insert({
