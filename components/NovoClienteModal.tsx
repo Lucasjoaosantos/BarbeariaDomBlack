@@ -4,10 +4,15 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSessao } from '@/context/SessaoContext'
+import { USUARIOS } from '@/lib/usuarios'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Check } from 'lucide-react'
+
+// Lista de barbeiros disponível para atribuição (usada quando quem cadastra é caixa/admin)
+const BARBEIROS = USUARIOS.filter(u => u.perfil === 'barbeiro')
 
 interface NovoClienteModalProps {
   onSuccess: () => void
@@ -21,12 +26,22 @@ export function NovoClienteModal({ onSuccess }: NovoClienteModalProps) {
   const [nome, setNome] = useState('')
   const [telefone, setTelefone] = useState('')
   const [permiteFiado, setPermiteFiado] = useState(false)
+  const [barbeiroEscolhido, setBarbeiroEscolhido] = useState('')
+
+  // Caixa e admin precisam escolher manualmente para qual barbeiro o cliente vai;
+  // o próprio barbeiro logado já se torna o dono automaticamente.
+  const precisaEscolherBarbeiro = usuario?.perfil !== 'barbeiro'
 
   async function handleSalvar(e: React.FormEvent) {
     e.preventDefault()
     
     if (!nome.trim() || !telefone.trim()) {
       alert('Nome e Telefone/WhatsApp são obrigatórios!')
+      return
+    }
+
+    if (precisaEscolherBarbeiro && !barbeiroEscolhido) {
+      alert('Selecione para qual barbeiro esse cliente vai ficar!')
       return
     }
 
@@ -59,8 +74,11 @@ export function NovoClienteModal({ onSuccess }: NovoClienteModalProps) {
         return
       }
 
-      // Barbeiros cadastram clientes com seu próprio ID. Caixa/admin não atribuem dono.
-      const barbeiro_id = usuario?.perfil === 'barbeiro' ? usuario.proprietarioCaixa : null
+      // Barbeiros cadastram clientes com seu próprio ID.
+      // Caixa/admin atribuem o dono através do barbeiro escolhido no formulário.
+      const barbeiro_id = usuario?.perfil === 'barbeiro'
+        ? usuario.proprietarioCaixa
+        : barbeiroEscolhido
 
       const { error: erroInsert } = await supabase
         .from('clientes')
@@ -82,6 +100,7 @@ export function NovoClienteModal({ onSuccess }: NovoClienteModalProps) {
       setNome('')
       setTelefone('')
       setPermiteFiado(false)
+      setBarbeiroEscolhido('')
       alert('Cliente cadastrado com sucesso!')
       onSuccess()
       setOpen(false)
@@ -144,6 +163,30 @@ export function NovoClienteModal({ onSuccess }: NovoClienteModalProps) {
               className="bg-zinc-950 border-zinc-800 h-11 text-xs rounded-xl focus-visible:ring-zinc-700 text-zinc-200 font-mono placeholder:text-zinc-700 font-bold"
             />
           </div>
+
+          {/* CAMPO BARBEIRO (apenas para caixa/admin) */}
+          {precisaEscolherBarbeiro && (
+            <div className="space-y-1.5">
+              <Label htmlFor="barbeiro" className="text-[10px] font-bold tracking-wider uppercase text-zinc-500">
+                Atribuir ao Barbeiro *
+              </Label>
+              <Select value={barbeiroEscolhido} onValueChange={setBarbeiroEscolhido}>
+                <SelectTrigger
+                  id="barbeiro"
+                  className="w-full bg-zinc-950 border-zinc-800 h-11 text-xs rounded-xl focus-visible:ring-zinc-700 text-zinc-200 font-medium tracking-wide"
+                >
+                  <SelectValue placeholder="Selecione o barbeiro" />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
+                  {BARBEIROS.map((barbeiro) => (
+                    <SelectItem key={barbeiro.usuario} value={barbeiro.proprietarioCaixa}>
+                      {barbeiro.profissional}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* CHECKBOX CUSTOMIZADO PREMIUM */}
           <div 
