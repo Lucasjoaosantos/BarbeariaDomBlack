@@ -132,16 +132,15 @@ export default function CaixaRelatoriosPage() {
       const { data: movs, error: errMovs } = await query
       if (errMovs) throw errMovs
 
-      let fichaQuery = supabase
+      // "Pendente em Ficha" é um SALDO acumulado (o que os clientes ainda devem),
+      // não um total do período. Por isso essa consulta NUNCA é filtrada por data:
+      // ela soma todo o histórico (débitos de consumo - créditos de pagamento) e
+      // só diminui quando um pagamento (crédito) é lançado, independente do filtro
+      // de período selecionado na tela (Hoje/7 dias/Mês/Ano/Data).
+      const { data: fichaRows, error: errFicha } = await supabase
         .from('historico_ficha')
         .select('valor')
-        .gte('created_at', dataInicio.toISOString())
 
-      if (dataFim) {
-        fichaQuery = fichaQuery.lte('created_at', dataFim.toISOString())
-      }
-
-      const { data: fichaRows, error: errFicha } = await fichaQuery
       if (errFicha) throw errFicha
 
       const saldoLiquidoFicha = (fichaRows || []).reduce((acc, row) => acc + Number(row.valor), 0)
